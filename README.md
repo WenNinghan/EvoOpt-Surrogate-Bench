@@ -45,7 +45,7 @@ In real-world **structural finite-element engineering** and **AI4Science environ
    \mathbf{x}_i^{(t+1)} = \mathbf{x}_{\text{best}} + \beta_t\!\left(1 - \frac{t}{T_{\max}}\right)(\mathbf{x}_i^{(t)} - \mathbf{x}_{\text{best}}) + \gamma_t\,\mathrm{Levy}(\beta)\odot(\mathbf{x}_{r_1}^{(t)} - \bar{\mathbf{x}}^{(t)})
    ```
 
-3. **Human Development Phase ($`t / T_{\max} > \rho_{\text{exp}}`$)**: Stratifies the feasibility-ranked population into four cooperative roles:
+3. **Human Development Phase ($`t / T_{\max} \gt \rho_{\text{exp}}`$)**: Stratifies the feasibility-ranked population into four cooperative roles:
    - **Leaders (Top 20%)**: Local exploitation and differential boundary refinement along active nonlinear constraints ($`g_j(\mathbf{x}) = 0`$).
    - **Explorers (Next 30%)**: Lévy-assisted boundary traversal between population centroid $`\bar{\mathbf{x}}`$ and $`\mathbf{x}_{\text{best}}`$.
    - **Followers (Next 30%)**: Adaptive social learning guided by randomly paired Leaders.
@@ -56,8 +56,8 @@ In real-world **structural finite-element engineering** and **AI4Science environ
 ### 2. Canonical Constraint-Handling Mechanisms (`evoopt/constraints.py`)
 Given $`\min_{\mathbf{x}} f(\mathbf{x})`$ subject to $`g_j(\mathbf{x}) \le 0`$ ($`j = 1, \dots, m`$), total constraint violation is $`\mathrm{CV}(\mathbf{x}) = \sum_{j=1}^m \max(0, g_j(\mathbf{x}))`$:
 
-- **Deb's Parameter-Free Feasibility Rules** (Deb, *CMAME* 2000): Candidate $`\mathbf{x}_a`$ dominates $`\mathbf{x}_b`$ iff: (i) both are feasible ($`\mathrm{CV}=0`$) and $`f(\mathbf{x}_a) < f(\mathbf{x}_b)`$; (ii) $`\mathbf{x}_a`$ is feasible and $`\mathbf{x}_b`$ is infeasible; or (iii) both are infeasible and $`\mathrm{CV}(\mathbf{x}_a) < \mathrm{CV}(\mathbf{x}_b)`$.
-- **$`\epsilon`$-Constraint Relaxation** (Takahama & Sakai, 2006): Relaxes feasibility up to an annealed threshold $`\epsilon(t) = \epsilon_0 (1 - t / T_c)^{c_p}`$ for $`t < T_c`$ and $`\epsilon(t) = 0`$ thereafter, allowing smooth traversal across narrow active-constraint necks.
+- **Deb's Parameter-Free Feasibility Rules** (Deb, *CMAME* 2000): Candidate $`\mathbf{x}_a`$ dominates $`\mathbf{x}_b`$ iff: (i) both are feasible ($`\mathrm{CV}=0`$) and $`f(\mathbf{x}_a) \lt f(\mathbf{x}_b)`$; (ii) $`\mathbf{x}_a`$ is feasible and $`\mathbf{x}_b`$ is infeasible; or (iii) both are infeasible and $`\mathrm{CV}(\mathbf{x}_a) \lt \mathrm{CV}(\mathbf{x}_b)`$.
+- **$`\epsilon`$-Constraint Relaxation** (Takahama & Sakai, 2006): Relaxes feasibility up to an annealed threshold $`\epsilon(t) = \epsilon_0 (1 - t / T_c)^{c_p}`$ for $`t \lt T_c`$ and $`\epsilon(t) = 0`$ thereafter, allowing smooth traversal across narrow active-constraint necks.
 - **Adaptive Dynamic Penalty**: Scales penalty pressure dynamically with objective IQR and search progress $`\lambda(t) = \lambda_0 s_f (1 + \alpha (t / T_{\max})^\beta)`$.
 
 ---
