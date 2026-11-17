@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evoopt-surrogate-bench"
+version = "0.1.0"
+description = "Constrained Engineering Optimization & Surrogate-Assisted Evolutionary Algorithms (SAEA) Benchmark Suite"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Wen Ninghan"}
+]
+keywords = [
+    "evolutionary-optimization",
+    "surrogate-assisted-optimization",
+    "HEOA",
+    "NSGA-II",
+    "MOEA/D",
+    "kriging",
+    "deep-ensemble",
+    "constrained-optimization",
+    "AI4Science",
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.3.0",
+    "torch>=2.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evoopt*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v"
