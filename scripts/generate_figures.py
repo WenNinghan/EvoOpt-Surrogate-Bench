@@ -1,7 +1,7 @@
 """
-Publication-Grade Figure Generator for EvoOpt-Surrogate-Bench (300 DPI).
+Top-Journal / CCF-A Camera-Ready Figure Generator for EvoOpt-Surrogate-Bench (300 DPI).
 
-Generates 4 multi-panel scientific figures in assets/:
+Generates 4 multi-panel publication figures in assets/ (SIAM / IEEE TEVC / ESWA style):
   1. assets/three_bar_truss_landscape_and_trajectory.png
   2. assets/surrogate_efficiency_convergence.png
   3. assets/pareto_frontier_chemical_and_zdt.png
@@ -32,39 +32,169 @@ if str(ROOT) not in sys.path:
 import evoopt as eo
 
 
-# Clean academic typography & colorblind-safe Okabe-Ito-inspired palette
+# ==============================================================================
+# Top-Journal / CCF-A Typography, Frame & Academic Palette Configuration
+# ==============================================================================
 plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "font.size": 10,
-    "axes.titlesize": 11.5,
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "STIXGeneral", "DejaVu Serif"],
+    "font.weight": "bold",
+    "mathtext.fontset": "stix",
+    "font.size": 10.2,
+    "axes.titlesize": 11.2,
     "axes.titleweight": "bold",
     "axes.labelsize": 10.5,
-    "xtick.labelsize": 9.2,
-    "ytick.labelsize": 9.2,
-    "legend.fontsize": 8.6,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
+    "axes.labelweight": "bold",
+    "xtick.labelsize": 9.3,
+    "ytick.labelsize": 9.3,
+    "legend.fontsize": 8.4,
+    "figure.titlesize": 12.6,
+    "figure.titleweight": "bold",
+    "figure.facecolor": "#FFFFFF",
+    "axes.facecolor": "#FFFFFF",
+    "savefig.facecolor": "#FFFFFF",
+    "axes.edgecolor": "#111111",
+    "axes.linewidth": 1.30,
+    "axes.spines.top": True,
+    "axes.spines.right": True,
+    "axes.spines.bottom": True,
+    "axes.spines.left": True,
     "axes.grid": True,
-    "grid.alpha": 0.25,
-    "grid.linestyle": "--",
+    "grid.linestyle": ":",
+    "grid.linewidth": 0.70,
+    "grid.alpha": 0.35,
+    "grid.color": "#94A3B8",
     "figure.dpi": 150,
     "savefig.dpi": 300,
 })
 
+# High-contrast journal palette (Navy, Emerald, Crimson, Ochre, Plum, Slate)
 PALETTE = {
-    "SA-HEOA": "#D55E00",       # Vermilion / prominent highlight
-    "SA-HEOA-DEns": "#CC79A7",  # Reddish purple
-    "HEOA": "#0072B2",          # Deep ocean blue
-    "DE": "#009E73",            # Bluish green
-    "PSO": "#E69F00",           # Golden orange
-    "SA-NSGA-II": "#D55E00",
-    "NSGA-II": "#0072B2",
-    "MOEA/D": "#009E73",
+    "SA-HEOA": "#B03A2E",       # Crimson (primary surrogate-assisted method)
+    "SA-HEOA-DEns": "#5B2C6F",  # Plum (deep ensemble surrogate)
+    "HEOA": "#1B4F72",          # Navy (standard HEOA)
+    "DE": "#0B6E4F",            # Emerald (Differential Evolution)
+    "PSO": "#C55A11",           # Ochre (Particle Swarm Optimization)
+    "SA-NSGA-II": "#B03A2E",    # Crimson
+    "NSGA-II": "#1B4F72",       # Navy
+    "MOEA/D": "#0B6E4F",        # Emerald
 }
 
 
+def _style_continuous_axes(ax: plt.Axes) -> None:
+    """Apply 4-sided closed #111111 frame, 4-sided inward ticks, and subtle dotted grid."""
+    ax.set_facecolor("#FFFFFF")
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_edgecolor("#111111")
+        spine.set_linewidth(1.30)
+    ax.tick_params(
+        axis="both",
+        which="major",
+        direction="in",
+        top=True,
+        right=True,
+        bottom=True,
+        left=True,
+        length=4.5,
+        width=1.2,
+        color="#111111",
+        labelcolor="#111111",
+    )
+    ax.tick_params(
+        axis="both",
+        which="minor",
+        direction="in",
+        top=True,
+        right=True,
+        bottom=True,
+        left=True,
+        length=2.5,
+        width=0.9,
+        color="#111111",
+    )
+    ax.grid(True, which="major", linestyle=":", linewidth=0.70, alpha=0.35, color="#94A3B8")
+
+
+def _style_categorical_axes(ax: plt.Axes) -> None:
+    """Apply 4-sided closed #111111 frame, inward y-ticks, and outward bottom x-ticks."""
+    ax.set_facecolor("#FFFFFF")
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_edgecolor("#111111")
+        spine.set_linewidth(1.30)
+    ax.tick_params(
+        axis="y",
+        which="major",
+        direction="in",
+        left=True,
+        right=True,
+        length=4.5,
+        width=1.2,
+        color="#111111",
+        labelcolor="#111111",
+    )
+    ax.tick_params(
+        axis="x",
+        which="major",
+        direction="out",
+        bottom=True,
+        top=False,
+        length=4.2,
+        width=1.2,
+        color="#111111",
+        labelcolor="#111111",
+    )
+    ax.grid(True, axis="y", linestyle=":", linewidth=0.70, alpha=0.35, color="#94A3B8")
+    ax.grid(False, axis="x")
+
+
+def _finalize_journal_figure(fig: plt.Figure) -> None:
+    """Enforce bold Times New Roman across every axis, colorbar, tick, annotation, and legend."""
+    fig.canvas.draw()
+    for text_obj in fig.texts:
+        text_obj.set_fontfamily("Times New Roman")
+        text_obj.set_fontweight("bold")
+
+    for ax in fig.axes:
+        ax.title.set_fontfamily("Times New Roman")
+        ax.title.set_fontweight("bold")
+        ax.xaxis.label.set_fontfamily("Times New Roman")
+        ax.xaxis.label.set_fontweight("bold")
+        ax.yaxis.label.set_fontfamily("Times New Roman")
+        ax.yaxis.label.set_fontweight("bold")
+        ax.xaxis.get_offset_text().set_fontfamily("Times New Roman")
+        ax.xaxis.get_offset_text().set_fontweight("bold")
+        ax.yaxis.get_offset_text().set_fontfamily("Times New Roman")
+        ax.yaxis.get_offset_text().set_fontweight("bold")
+
+        for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+            lbl.set_fontfamily("Times New Roman")
+            lbl.set_fontweight("bold")
+        for lbl in ax.get_xticklabels(minor=True) + ax.get_yticklabels(minor=True):
+            lbl.set_fontfamily("Times New Roman")
+            lbl.set_fontweight("bold")
+
+        for txt in ax.texts:
+            txt.set_fontfamily("Times New Roman")
+            txt.set_fontweight("bold")
+
+        leg = ax.get_legend()
+        if leg is not None:
+            for ltxt in leg.get_texts():
+                ltxt.set_fontfamily("Times New Roman")
+                ltxt.set_fontweight("bold")
+            if leg.get_title() is not None:
+                leg.get_title().set_fontfamily("Times New Roman")
+                leg.get_title().set_fontweight("bold")
+            frame = leg.get_frame()
+            frame.set_linewidth(1.1)
+            frame.set_edgecolor("#111111")
+            frame.set_facecolor("#FFFFFF")
+
+
 def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
-    """Figure 1: 2D Feasible Landscape, Stress Boundaries, HEOA vs SA-HEOA Queries."""
+    """Figure 1: 2D Feasible Landscape, Stress Boundaries, HEOA vs. SA-HEOA Queries."""
     prob = eo.ThreeBarTruss()
     n_grid = 320
     x1 = np.linspace(0.02, 1.0, n_grid)
@@ -84,33 +214,44 @@ def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
         max_evals=160, n_init=24, surrogate_type="gp", infill_per_iter=4, seed=7
     ).optimize(prob)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.6), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(13.6, 5.8), constrained_layout=True)
 
     for idx_ax, ax in enumerate(axes):
-        # Objective contours inside feasible region, muted outside
+        _style_continuous_axes(ax)
+
+        # Objective contours inside feasible region, muted isolines outside
         F_feas = np.where(feas_mask, F_map, np.nan)
         cf = ax.contourf(
-            X1, X2, F_feas, levels=22, cmap="YlGnBu_r", alpha=0.88
+            X1, X2, F_feas, levels=22, cmap="YlGnBu_r", alpha=0.88, zorder=1
         )
-        ax.contour(X1, X2, F_map, levels=14, colors="#555555", linewidths=0.45, alpha=0.35)
+        ax.contour(
+            X1, X2, F_map, levels=14, colors="#5D6D7E", linewidths=0.48, alpha=0.36, zorder=2
+        )
 
-        # Infeasible zone hatching / shading
+        # Infeasible zone shading
         infeas_field = np.where(~feas_mask, 1.0, np.nan)
-        ax.contourf(X1, X2, infeas_field, levels=[0.5, 1.5], colors=["#F2D7D5"], alpha=0.55)
+        ax.contourf(
+            X1, X2, infeas_field, levels=[0.5, 1.5], colors=["#F8E8E6"], alpha=0.60, zorder=1
+        )
 
-        # Nonlinear stress constraint boundaries g1=0, g3=0 (g2 is strictly inactive inside g1<=0)
-        ax.contour(X1, X2, G1, levels=[0.0], colors="#C0392B", linewidths=2.0, linestyles="-")
-        ax.contour(X1, X2, G3, levels=[0.0], colors="#8E44AD", linewidths=1.8, linestyles="--")
+        # Nonlinear stress constraint boundaries g1=0, g3=0
+        ax.contour(
+            X1, X2, G1, levels=[0.0], colors="#B03A2E", linewidths=2.15, linestyles="-", zorder=6
+        )
+        ax.contour(
+            X1, X2, G3, levels=[0.0], colors="#5B2C6F", linewidths=1.85, linestyles="--", zorder=6
+        )
 
+        # Placed cleanly in open region away from active boundary query clusters
         ax.text(
-            0.55, 0.72, "Infeasible Stress Zone\n($g_1(\\mathbf{x}) > 0$)",
-            color="#922B21", fontsize=8.8, fontweight="bold", ha="center",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="#C0392B", alpha=0.82),
+            0.28, 0.77, "Infeasible Stress Zone\n($g_1(\\mathbf{x}) > 0$)",
+            color="#B03A2E", fontsize=8.8, fontweight="bold", ha="center", va="center", zorder=9,
+            bbox=dict(boxstyle="square,pad=0.30", facecolor="#FFFFFF", edgecolor="#B03A2E", lw=1.0, alpha=0.94),
         )
         ax.text(
-            0.88, 0.86, "Feasible Region\n($g_1, g_2, g_3 \\leq 0$)",
-            color="#1B4F72", fontsize=8.6, fontweight="bold", ha="center",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="#1B4F72", alpha=0.82),
+            0.875, 0.895, "Feasible Region\n($g_1, g_2, g_3 \\leq 0$)",
+            color="#1B4F72", fontsize=8.6, fontweight="bold", ha="center", va="center", zorder=9,
+            bbox=dict(boxstyle="square,pad=0.28", facecolor="#FFFFFF", edgecolor="#1B4F72", lw=1.0, alpha=0.94),
         )
 
         if idx_ax == 0:
@@ -120,19 +261,21 @@ def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
             pop_final = snaps[-1][1]
 
             ax.scatter(
-                pop_init[:, 0], pop_init[:, 1], s=26, c="#7F8C8D", marker="o",
-                alpha=0.55, label="Initial Chaotic Pop ($t=0$)"
+                pop_init[:, 0], pop_init[:, 1], s=28, c="#5D6D7E", marker="o",
+                edgecolor="#111111", linewidth=0.35, alpha=0.62, zorder=4,
+                label="Initial Chaotic Pop. ($t = 0$)"
             )
             ax.scatter(
-                pop_mid[:, 0], pop_mid[:, 1], s=32, c="#2980B9", marker="^",
-                alpha=0.75, label="Exploration/Dev Pop ($t=0.5 T_{\\max}$)"
+                pop_mid[:, 0], pop_mid[:, 1], s=34, c="#1B4F72", marker="^",
+                edgecolor="#FFFFFF", linewidth=0.35, alpha=0.82, zorder=5,
+                label="Exploration Pop. ($t = 0.5\\,T_{\\max}$)"
             )
             ax.scatter(
-                pop_final[:, 0], pop_final[:, 1], s=42, c="#004D40", marker="s",
-                edgecolor="white", linewidth=0.5, alpha=0.92,
-                label=f"Converged Leaders (1,500 evals, $f={heoa_res.f_best:.4f}$)"
+                pop_final[:, 0], pop_final[:, 1], s=44, c="#0B6E4F", marker="s",
+                edgecolor="#FFFFFF", linewidth=0.55, alpha=0.95, zorder=7,
+                label=f"Converged Leaders ($1{{,}}500$ evals,  $f = {heoa_res.f_best:.4f}$)"
             )
-            ax.set_title("(a) Standard HEOA Population Dynamics (1,500 Evals)")
+            ax.set_title("(a) Standard HEOA Population Dynamics ($1{,}500$ Evals)", pad=8)
         else:
             n_init = sa_res.n_init
             X_doe = sa_res.evaluated_X[:n_init]
@@ -140,45 +283,63 @@ def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
             steps = np.arange(1, len(X_inf) + 1)
 
             ax.scatter(
-                X_doe[:, 0], X_doe[:, 1], s=38, facecolor="white", edgecolor="#34495E",
-                marker="D", linewidth=1.1, zorder=4, label=f"LHS Initial DoE ($N_{{\\mathrm{{init}}}}={n_init}$)"
+                X_doe[:, 0], X_doe[:, 1], s=40, facecolor="#FFFFFF", edgecolor="#1B4F72",
+                marker="D", linewidth=1.25, zorder=4,
+                label=f"LHS Initial DoE ($N_{{\\mathrm{{init}}}} = {n_init}$)"
             )
             sc = ax.scatter(
-                X_inf[:, 0], X_inf[:, 1], s=40, c=steps, cmap="plasma",
-                edgecolor="black", linewidth=0.35, zorder=5,
-                label=f"CEI + Trust-Region Infill ({len(X_inf)} queries)"
+                X_inf[:, 0], X_inf[:, 1], s=42, c=steps, cmap="plasma",
+                edgecolor="#111111", linewidth=0.45, zorder=7,
+                label=f"CEI + Trust-Region Infill (${len(X_inf)}$ queries)"
             )
-            cbar_inf = fig.colorbar(sc, ax=ax, fraction=0.045, pad=0.02)
-            cbar_inf.set_label("Active-Learning Query Index", fontsize=8.8)
-            ax.set_title(f"(b) SA-HEOA Active-Learning Queries (160 Evals, $f={sa_res.f_best:.4f}$)")
+            cbar_inf = fig.colorbar(sc, ax=ax, fraction=0.045, pad=0.025)
+            cbar_inf.set_label("Active-Learning Query Index $k$", fontsize=9.2)
+            cbar_inf.outline.set_edgecolor("#111111")
+            cbar_inf.outline.set_linewidth(1.15)
+            cbar_inf.ax.tick_params(direction="in", length=3.5, width=1.0, color="#111111")
+            ax.set_title(
+                f"(b) SA-HEOA Active-Learning Queries ($160$ Evals,  $f = {sa_res.f_best:.4f}$)",
+                pad=8,
+            )
 
         # Global Analytical Optimum Star
         ax.scatter(
-            [prob.x_opt[0]], [prob.x_opt[1]], s=230, c="#FFD700", edgecolor="#111111",
-            marker="*", linewidth=1.2, zorder=10,
-            label=f"Analytical Optimum $\\mathbf{{x}}^*$ ($f^*={prob.f_opt:.4f}$)"
+            [prob.x_opt[0]], [prob.x_opt[1]], s=240, c="#F4D03F", edgecolor="#111111",
+            marker="*", linewidth=1.25, zorder=10,
+            label=f"Analytical Optimum $\\mathbf{{x}}^*$ ($f^* = {prob.f_opt:.4f}$)"
         )
 
         # Custom legend entries for constraint curves
         handles, labels = ax.get_legend_handles_labels()
         handles.extend([
-            Line2D([0], [0], color="#C0392B", lw=2.0, ls="-", label="Active Stress $g_1(\\mathbf{x})=0$"),
-            Line2D([0], [0], color="#8E44AD", lw=1.8, ls="--", label="Member Stress $g_3(\\mathbf{x})=0$"),
+            Line2D([0], [0], color="#B03A2E", lw=2.15, ls="-", label="Active Stress $g_1(\\mathbf{x}) = 0$"),
+            Line2D([0], [0], color="#5B2C6F", lw=1.85, ls="--", label="Member Stress $g_3(\\mathbf{x}) = 0$"),
         ])
-        ax.legend(handles=handles, loc="lower left", framealpha=0.92)
-        ax.set_xlabel("Cross-Sectional Area $x_1 = A_1 = A_3$ ($\\mathrm{cm}^2$)")
-        ax.set_ylabel("Cross-Sectional Area $x_2 = A_2$ ($\\mathrm{cm}^2$)")
+        ax.legend(
+            handles=handles,
+            loc="lower left",
+            fancybox=False,
+            edgecolor="#111111",
+            framealpha=0.96,
+            fontsize=8.1,
+        )
+        ax.set_xlabel("Cross-Sectional Area $x_1 = A_1 = A_3$ [$\\mathrm{cm}^2$]")
+        ax.set_ylabel("Cross-Sectional Area $x_2 = A_2$ [$\\mathrm{cm}^2$]")
         ax.set_xlim(0.02, 1.0)
         ax.set_ylim(0.02, 1.0)
 
         if idx_ax == 0:
-            cbar_f = fig.colorbar(cf, ax=ax, fraction=0.045, pad=0.02)
-            cbar_f.set_label("Feasible Truss Volume $f(\\mathbf{x})$ ($\\mathrm{cm}^3$)", fontsize=8.8)
+            cbar_f = fig.colorbar(cf, ax=ax, fraction=0.045, pad=0.025)
+            cbar_f.set_label("Feasible Truss Volume $f(\\mathbf{x})$ [$\\mathrm{cm}^3$]", fontsize=9.2)
+            cbar_f.outline.set_edgecolor("#111111")
+            cbar_f.outline.set_linewidth(1.15)
+            cbar_f.ax.tick_params(direction="in", length=3.5, width=1.0, color="#111111")
 
     fig.suptitle(
-        "Three-Bar Truss Constrained Structural Optimization: Evolutionary Swarm vs. Kriging Surrogate Active Learning",
-        fontsize=12.5, fontweight="bold",
+        "Three-Bar Truss Constrained Structural Optimization: Evolutionary Swarm vs. Kriging Active Learning",
+        fontsize=12.6, fontweight="bold",
     )
+    _finalize_journal_figure(fig)
     out_path = assets_dir / "three_bar_truss_landscape_and_trajectory.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -190,24 +351,32 @@ def plot_surrogate_efficiency_convergence(
     report: dict,
     traj_data: np.lib.npyio.NpzFile,
 ) -> None:
-    """Figure 2: Convergence vs True Function Evaluations Highlighting 88-89% Savings."""
+    """Figure 2: Convergence vs. True Function Evaluations Highlighting 89.3% Savings."""
     problems = [
-        ("three_bar_truss", "Three-Bar Truss ($D=2, m=3$)"),
-        ("tension_compression_spring", "Tension/Compression Spring ($D=3, m=4$)"),
-        ("pressure_vessel", "Cylindrical Pressure Vessel ($D=4, m=4$)"),
+        ("three_bar_truss", "Three-Bar Truss ($D = 2,\\; m = 3$)"),
+        ("tension_compression_spring", "Tension/Compression Spring ($D = 3,\\; m = 4$)"),
+        ("pressure_vessel", "Cylindrical Pressure Vessel ($D = 4,\\; m = 4$)"),
     ]
     algs = [
-        ("SA-HEOA", "SA-HEOA (GP Kriging, 160 evals)", "-", 2.5),
-        ("SA-HEOA-DEns", "SA-HEOA (PyTorch Ensemble, 180 evals)", "-.", 2.1),
-        ("HEOA", "HEOA (1,500 evals)", "-", 1.9),
-        ("DE", "DE (1,500 evals)", "--", 1.8),
-        ("PSO", "PSO (1,500 evals)", ":", 1.9),
+        ("SA-HEOA", "SA-HEOA (GP Kriging, $160$ evals)", "-", 2.55),
+        ("SA-HEOA-DEns", "SA-HEOA (Deep Ensemble, $180$ evals)", "-.", 2.15),
+        ("HEOA", "HEOA ($1{,}500$ evals)", "-", 1.95),
+        ("DE", "DE ($1{,}500$ evals)", "--", 1.85),
+        ("PSO", "PSO ($1{,}500$ evals)", ":", 2.00),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.9), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(15.8, 5.1), constrained_layout=True)
+
+    # Custom non-overlapping callout text positions in the open lower pocket below evolutionary curves
+    callout_cfg = {
+        "three_bar_truss": (410, 2.2e-4, (7e-5, 28.0)),
+        "tension_compression_spring": (420, 0.55, (0.14, 2.2e7)),
+        "pressure_vessel": (410, 2.1, (0.85, 2.0e3)),
+    }
 
     for idx, (p_key, title) in enumerate(problems):
         ax = axes[idx]
+        _style_continuous_axes(ax)
         prob = eo.get_problem(p_key)
         f_opt = prob.f_opt
 
@@ -215,18 +384,23 @@ def plot_surrogate_efficiency_convergence(
             prefix = f"{p_key}__{alg_key.replace('-', '_')}"
             grid = traj_data[f"{prefix}__grid"]
             curves = traj_data[f"{prefix}__curves"]
-            # Plot relative optimality gap (%) = max(1e-5, (f - f*) / f* * 100)
             gaps = np.maximum(1e-5, (curves - f_opt) / f_opt * 100.0)
             med = np.median(gaps, axis=0)
             q25 = np.percentile(gaps, 25, axis=0)
             q75 = np.percentile(gaps, 75, axis=0)
 
             color = PALETTE[alg_key]
-            ax.plot(grid, med, label=label, color=color, linestyle=ls, linewidth=lw, zorder=4 if "SA" in alg_key else 3)
-            ax.fill_between(grid, q25, q75, color=color, alpha=0.14)
-            ax.scatter([grid[-1]], [med[-1]], color=color, s=36, zorder=6, edgecolor="white", linewidth=0.6)
+            ax.plot(
+                grid, med, label=label, color=color, linestyle=ls, linewidth=lw,
+                zorder=5 if "SA" in alg_key else 3
+            )
+            ax.fill_between(grid, q25, q75, color=color, alpha=0.13, zorder=2)
+            ax.scatter(
+                [grid[-1]], [med[-1]], color=color, s=40, zorder=6,
+                edgecolor="#111111", linewidth=0.75
+            )
 
-        # Annotate 89.3% evaluation reduction from 1,500 -> 160
+        # Annotate 89.3% evaluation reduction cleanly in open whitespace below baseline curves
         sa_med_end = float(
             np.median(
                 np.maximum(
@@ -235,30 +409,41 @@ def plot_surrogate_efficiency_convergence(
                 )
             )
         )
-        ax.axvline(160, color=PALETTE["SA-HEOA"], linestyle="--", linewidth=1.0, alpha=0.65)
+        tx, ty, y_bounds = callout_cfg[p_key]
+        ax.axvline(160, color=PALETTE["SA-HEOA"], linestyle="--", linewidth=1.1, alpha=0.65, zorder=2)
         ax.annotate(
-            "89.3% Fewer\nTrue Evals\n(160 vs. 1,500)",
+            "89.3% Fewer Evals\n($160$ vs. $1{,}500$)",
             xy=(160, max(sa_med_end, 1e-4)),
-            xytext=(470, max(sa_med_end * 8.0, 0.08)),
-            arrowprops=dict(arrowstyle="->", color="#B03A2E", lw=1.4),
-            fontsize=8.5,
+            xytext=(tx, ty),
+            arrowprops=dict(arrowstyle="-|>", color="#B03A2E", lw=1.35, mutation_scale=11),
+            fontsize=8.4,
             fontweight="bold",
-            color="#922B21",
-            bbox=dict(boxstyle="round,pad=0.28", facecolor="#FDEDEC", edgecolor="#D55E00", alpha=0.92),
+            color="#B03A2E",
+            zorder=8,
+            bbox=dict(boxstyle="square,pad=0.30", facecolor="#FFFFFF", edgecolor="#B03A2E", lw=1.0, alpha=0.96),
         )
 
         ax.set_yscale("log")
-        ax.set_xlim(0, 1530)
-        ax.set_title(f"({chr(97 + idx)}) {title}")
-        ax.set_xlabel("True Expensive Function Evaluations")
+        ax.set_xlim(0, 1550)
+        ax.set_ylim(*y_bounds)
+        _style_continuous_axes(ax)
+        ax.set_title(f"({chr(97 + idx)}) {title}", pad=8)
+        ax.set_xlabel("True Expensive Function Evaluations $N_{\\mathrm{eval}}$")
         if idx == 0:
-            ax.set_ylabel("Relative Optimality Gap $(f - f^*) / f^*$ [%] (log)")
-            ax.legend(loc="upper right", framealpha=0.93)
+            ax.set_ylabel("Relative Optimality Gap $(f - f^*) / f^*$ [%]")
+            ax.legend(
+                loc="upper right",
+                fancybox=False,
+                edgecolor="#111111",
+                framealpha=0.96,
+                fontsize=8.1,
+            )
 
     fig.suptitle(
-        "Sample Efficiency Across Constrained Engineering Benchmarks (20 Seeds: Median & Interquartile Band)",
-        fontsize=12.5, fontweight="bold",
+        "Sample Efficiency Across Constrained Engineering Benchmarks ($20$ Seeds: Median & Interquartile Band)",
+        fontsize=12.6, fontweight="bold",
     )
+    _finalize_journal_figure(fig)
     out_path = assets_dir / "surrogate_efficiency_convergence.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -267,10 +452,11 @@ def plot_surrogate_efficiency_convergence(
 
 def plot_pareto_frontiers(assets_dir: Path) -> None:
     """Figure 3: Constrained AOP Ozonation Reaction Kinetics + ZDT1 & ZDT3 Pareto Fronts."""
-    fig, axes = plt.subplots(1, 3, figsize=(16.0, 5.2), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(16.0, 5.35), constrained_layout=True)
 
     # --- Panel (a): AOP Ozonation Reaction Kinetics with Bromate Boundary & Knee Point ---
     ax0 = axes[0]
+    _style_continuous_axes(ax0)
     aop = eo.AOPOzonationKineticsMOO()
     pf_feas = aop.pareto_front(200)
     pf_uncons = aop.unconstrained_pareto_front(200)
@@ -281,38 +467,40 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
         max_evals=220, n_init=40, infill_per_iter=10, seed=2
     ).optimize(aop, track_hv=False)
 
-    # Convert f1 = 1 - eta into Removal Efficiency eta (%) = 100 * (1 - f1)
     eta_feas = 100.0 * (1.0 - pf_feas[:, 0])
     eta_uncons = 100.0 * (1.0 - pf_uncons[:, 0])
 
-    # Shade Bromate Regulatory Violation Zone between unconstrained PF and feasible PF
+    # Shade Bromate Regulatory Violation Zone
     eta_common = np.linspace(float(np.max(eta_feas)), float(np.max(eta_uncons)), 80)
     eeo_uncons_tail = np.interp(1.0 - eta_common / 100.0, pf_uncons[:, 0], pf_uncons[:, 1])
     ax0.fill_betweenx(
         eeo_uncons_tail, eta_feas[0], eta_common,
-        color="#FADBD8", alpha=0.65, label="Bromate Violation ($[\\mathrm{BrO}_3^-] > 10\\;\\mu\\mathrm{g/L}$)"
+        color="#FADBD8", alpha=0.70, zorder=1,
+        label="Bromate Violation ($[\\mathrm{BrO}_3^-] > 10\\;\\mu\\mathrm{g\\,L^{-1}}$)"
     )
     ax0.plot(
-        eta_uncons, pf_uncons[:, 1], color="#C0392B", linestyle="--", linewidth=1.6,
+        eta_uncons, pf_uncons[:, 1], color="#B03A2E", linestyle="--", linewidth=1.75, zorder=2,
         label="Unconstrained PF (Violates $\\mathrm{BrO}_3^-$)"
     )
     ax0.plot(
-        eta_feas, pf_feas[:, 1], color="#111111", linestyle="-", linewidth=2.2,
-        label="Feasible Reference PF ($[\\mathrm{BrO}_3^-] \\leq 10\\;\\mu\\mathrm{g/L}$)"
+        eta_feas, pf_feas[:, 1], color="#111111", linestyle="-", linewidth=2.25, zorder=3,
+        label="Feasible PF ($[\\mathrm{BrO}_3^-] \\leq 10\\;\\mu\\mathrm{g\\,L^{-1}}$)"
     )
 
     ax0.scatter(
         100.0 * (1.0 - r_nsga.F_pareto[:, 0]), r_nsga.F_pareto[:, 1],
-        s=26, c=PALETTE["NSGA-II"], alpha=0.72, marker="o", label="NSGA-II (2,400 evals)"
+        s=30, c=PALETTE["NSGA-II"], edgecolor="#FFFFFF", linewidth=0.35,
+        alpha=0.80, marker="o", zorder=4, label="NSGA-II ($2{,}400$ evals)"
     )
     ax0.scatter(
         100.0 * (1.0 - r_moead.F_pareto[:, 0]), r_moead.F_pareto[:, 1],
-        s=26, c=PALETTE["MOEA/D"], alpha=0.72, marker="^", label="MOEA/D (2,400 evals)"
+        s=32, c=PALETTE["MOEA/D"], edgecolor="#FFFFFF", linewidth=0.35,
+        alpha=0.80, marker="^", zorder=5, label="MOEA/D ($2{,}400$ evals)"
     )
     ax0.scatter(
         100.0 * (1.0 - r_sansga.F_pareto[:, 0]), r_sansga.F_pareto[:, 1],
-        s=42, c=PALETTE["SA-NSGA-II"], edgecolor="black", linewidth=0.45,
-        marker="D", zorder=6, label="SA-NSGA-II (220 evals, 90.8% saved)"
+        s=44, c=PALETTE["SA-NSGA-II"], edgecolor="#111111", linewidth=0.60,
+        marker="D", zorder=6, label="SA-NSGA-II ($220$ evals, $90.8\\%$ saved)"
     )
 
     # Highlight Knee-Point Operating Condition
@@ -322,33 +510,42 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
     eta_k = 100.0 * dk["eta_removal"]
     eeo_k = dk["eeo_kwh_m3_order"]
     ax0.scatter(
-        [eta_k], [eeo_k], s=220, c="#FFD700", edgecolor="#111111",
-        marker="*", linewidth=1.2, zorder=10, label="Knee-Point Design"
+        [eta_k], [eeo_k], s=230, c="#F4D03F", edgecolor="#111111",
+        marker="*", linewidth=1.25, zorder=10, label="Knee-Point Design"
     )
     ax0.annotate(
         f"Knee-Point Reactor Regime:\n"
-        f"pH={xk[0]:.2f}, $[\\mathrm{{O}}_3]_0$={xk[1]:.2f} mg/L\n"
-        f"$\\mathrm{{H}}_2\\mathrm{{O}}_2/\\mathrm{{O}}_3$={xk[2]:.2f}, HRT={xk[3]:.1f} min\n"
-        f"$\\eta$={eta_k:.1f}%, $[\\mathrm{{BrO}}_3^-]$={dk['bromate_ug_L']:.1f} $\\mu$g/L",
+        f"$\\mathrm{{pH}} = {xk[0]:.2f}$, $[\\mathrm{{O}}_3]_0 = {xk[1]:.2f}\\;\\mathrm{{mg\\,L^{{-1}}}}$\n"
+        f"$\\mathrm{{H}}_2\\mathrm{{O}}_2/\\mathrm{{O}}_3 = {xk[2]:.2f}$, $\\mathrm{{HRT}} = {xk[3]:.1f}\\;\\mathrm{{min}}$\n"
+        f"$\\eta = {eta_k:.1f}\\%$, $[\\mathrm{{BrO}}_3^-] = {dk['bromate_ug_L']:.1f}\\;\\mu\\mathrm{{g\\,L^{{-1}}}}$",
         xy=(eta_k, eeo_k),
-        xytext=(72.0, 0.138),
-        arrowprops=dict(arrowstyle="->", color="#111111", lw=1.3),
-        fontsize=8.0,
+        xytext=(66.2, 0.132),
+        arrowprops=dict(arrowstyle="-|>", color="#111111", lw=1.3, mutation_scale=11),
+        fontsize=7.9,
         zorder=11,
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#FEF9E7", edgecolor="#B7950B", alpha=0.95),
+        bbox=dict(boxstyle="square,pad=0.30", facecolor="#FEF9E7", edgecolor="#C55A11", lw=1.0, alpha=0.96),
     )
 
-    ax0.set_title("(a) Peroxone ($\\mathrm{O}_3/\\mathrm{H}_2\\mathrm{O}_2$) AOP Reaction Kinetics")
+    ax0.set_xlim(64.0, 100.5)
+    ax0.set_ylim(0.056, 0.276)
+    ax0.set_title("(a) Peroxone ($\\mathrm{O}_3/\\mathrm{H}_2\\mathrm{O}_2$) AOP Reaction Kinetics", pad=8)
     ax0.set_xlabel("Micropollutant Removal Efficiency $\\eta$ [%]")
-    ax0.set_ylabel("Specific Energy Cost $\\mathrm{EE/O}$ [$\\mathrm{kWh}\\cdot\\mathrm{m}^{-3}\\cdot\\mathrm{order}^{-1}$]")
-    ax0.legend(loc="upper left", fontsize=7.8, framealpha=0.92)
+    ax0.set_ylabel("Specific Energy Cost $\\mathrm{EE/O}$ [$\\mathrm{kWh\\,m^{-3}\\,order^{-1}}$]")
+    ax0.legend(
+        loc="upper left",
+        fancybox=False,
+        edgecolor="#111111",
+        framealpha=0.96,
+        fontsize=7.8,
+    )
 
     # --- Panel (b): ZDT1 Convex Benchmark & Panel (c): ZDT3 Disconnected Benchmark ---
     for idx_panel, (ProbCls, p_title) in enumerate([
-        (lambda: eo.ZDT1(dim=8), "(b) ZDT1 Convex Pareto Front ($D=8$)"),
-        (lambda: eo.ZDT3(dim=8), "(c) ZDT3 Disconnected Pareto Front ($D=8$)"),
+        (lambda: eo.ZDT1(dim=8), "(b) ZDT1 Convex Pareto Front ($D = 8$)"),
+        (lambda: eo.ZDT3(dim=8), "(c) ZDT3 Disconnected Pareto Front ($D = 8$)"),
     ], start=1):
         ax = axes[idx_panel]
+        _style_continuous_axes(ax)
         prob = ProbCls()
         pf = prob.pareto_front(300)
 
@@ -359,37 +556,48 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
         ).optimize(prob, track_hv=False)
 
         if "ZDT3" in p_title:
-            ax.scatter(pf[:, 0], pf[:, 1], s=8, c="#111111", label="Analytical True PF")
+            ax.scatter(pf[:, 0], pf[:, 1], s=10, c="#111111", zorder=3, label="Analytical True PF")
         else:
-            ax.plot(pf[:, 0], pf[:, 1], color="#111111", lw=2.0, label="Analytical True PF")
+            ax.plot(pf[:, 0], pf[:, 1], color="#111111", lw=2.2, zorder=3, label="Analytical True PF")
 
         hv_n = eo.compute_hypervolume(res_n.F_pareto, prob.ref_point)
         hv_m = eo.compute_hypervolume(res_m.F_pareto, prob.ref_point)
         hv_s = eo.compute_hypervolume(res_s.F_pareto, prob.ref_point)
 
         ax.scatter(
-            res_n.F_pareto[:, 0], res_n.F_pareto[:, 1], s=26, c=PALETTE["NSGA-II"],
-            alpha=0.70, marker="o", label=f"NSGA-II (2,400 evals, HV={hv_n:.3f})"
+            res_n.F_pareto[:, 0], res_n.F_pareto[:, 1], s=30, c=PALETTE["NSGA-II"],
+            edgecolor="#FFFFFF", linewidth=0.35, alpha=0.80, marker="o", zorder=4,
+            label=f"NSGA-II ($2{{,}}400$ evals, $\\mathrm{{HV}} = {hv_n:.3f}$)"
         )
         ax.scatter(
-            res_m.F_pareto[:, 0], res_m.F_pareto[:, 1], s=26, c=PALETTE["MOEA/D"],
-            alpha=0.70, marker="^", label=f"MOEA/D (2,400 evals, HV={hv_m:.3f})"
+            res_m.F_pareto[:, 0], res_m.F_pareto[:, 1], s=32, c=PALETTE["MOEA/D"],
+            edgecolor="#FFFFFF", linewidth=0.35, alpha=0.80, marker="^", zorder=5,
+            label=f"MOEA/D ($2{{,}}400$ evals, $\\mathrm{{HV}} = {hv_m:.3f}$)"
         )
         ax.scatter(
-            res_s.F_pareto[:, 0], res_s.F_pareto[:, 1], s=42, c=PALETTE["SA-NSGA-II"],
-            edgecolor="black", linewidth=0.45, marker="D", zorder=6,
-            label=f"SA-NSGA-II (220 evals, HV={hv_s:.3f})"
+            res_s.F_pareto[:, 0], res_s.F_pareto[:, 1], s=44, c=PALETTE["SA-NSGA-II"],
+            edgecolor="#111111", linewidth=0.60, marker="D", zorder=6,
+            label=f"SA-NSGA-II ($220$ evals, $\\mathrm{{HV}} = {hv_s:.3f}$)"
         )
 
-        ax.set_title(p_title)
+        y_lo, y_hi = ax.get_ylim()
+        ax.set_ylim(y_lo, y_hi + 0.12 * (y_hi - y_lo))
+        ax.set_title(p_title, pad=8)
         ax.set_xlabel("Objective $f_1(\\mathbf{x})$")
         ax.set_ylabel("Objective $f_2(\\mathbf{x})$")
-        ax.legend(loc="upper right", fontsize=8.1, framealpha=0.92)
+        ax.legend(
+            loc="upper right",
+            fancybox=False,
+            edgecolor="#111111",
+            framealpha=0.96,
+            fontsize=8.0,
+        )
 
     fig.suptitle(
-        "Multi-Objective Pareto Frontiers: Environmental Reaction Kinetics (Bromate-Constrained) & ZDT Suite",
-        fontsize=12.5, fontweight="bold",
+        "Multi-Objective Pareto Frontiers: Bromate-Constrained Environmental Kinetics & ZDT Suite",
+        fontsize=12.6, fontweight="bold",
     )
+    _finalize_journal_figure(fig)
     out_path = assets_dir / "pareto_frontier_chemical_and_zdt.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -403,30 +611,33 @@ def plot_constraint_handling_ablation(
 ) -> None:
     """Figure 4: 20-Seed Statistical Ablation of Constraint-Handling Mechanisms."""
     problems = [
-        ("three_bar_truss", "Three-Bar Truss", "Volume $f(\\mathbf{x})$ [$\\mathrm{cm}^3$]"),
+        ("three_bar_truss", "Three-Bar Truss", "Structural Volume $f(\\mathbf{x})$ [$\\mathrm{cm}^3$]"),
         ("tension_compression_spring", "Tension/Compression Spring", "Spring Weight $f(\\mathbf{x})$"),
         ("pressure_vessel", "Cylindrical Pressure Vessel", "Manufacturing Cost $f(\\mathbf{x})$ [USD]"),
     ]
     handlers = [
-        ("deb", "Deb's Feasibility\nRules", "#0072B2"),
-        ("epsilon", "$\\epsilon$-Constraint\nRelaxation", "#009E73"),
-        ("penalty", "Adaptive Dynamic\nPenalty", "#E69F00"),
+        ("deb", "Deb's Feasibility\nRules", "#1B4F72", ""),
+        ("epsilon", "$\\epsilon$-Constraint\nRelaxation", "#0B6E4F", "//"),
+        ("penalty", "Adaptive Dynamic\nPenalty", "#C55A11", "//"),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(14.8, 4.9), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(15.2, 5.2), constrained_layout=True)
     rng = np.random.default_rng(2026)
 
     for idx, (p_key, p_name, y_label) in enumerate(problems):
         ax = axes[idx]
+        _style_categorical_axes(ax)
         prob = eo.get_problem(p_key)
         data_list = []
         colors = []
+        hatches = []
         tick_labels = []
 
-        for pos, (h_key, h_label, col) in enumerate(handlers, start=1):
+        for h_key, h_label, col, h_pat in handlers:
             vals = traj_data[f"ablation__{p_key}__{h_key}__f_vals"]
             data_list.append(vals)
             colors.append(col)
+            hatches.append(h_pat)
             tick_labels.append(h_label)
 
         parts = ax.violinplot(
@@ -434,65 +645,86 @@ def plot_constraint_handling_ablation(
         )
         for pc, col in zip(parts["bodies"], colors):
             pc.set_facecolor(col)
-            pc.set_edgecolor("black")
-            pc.set_alpha(0.28)
+            pc.set_edgecolor("#111111")
+            pc.set_linewidth(0.85)
+            pc.set_alpha(0.22)
 
         bp = ax.boxplot(
             data_list,
             positions=[1, 2, 3],
-            widths=0.24,
+            widths=0.25,
             patch_artist=True,
             showfliers=False,
-            medianprops=dict(color="#111111", linewidth=2.0),
+            medianprops=dict(color="#111111", linewidth=2.2),
+            whiskerprops=dict(color="#111111", linewidth=1.15),
+            capprops=dict(color="#111111", linewidth=1.15),
         )
-        for patch, col in zip(bp["boxes"], colors):
+        for patch, col, h_pat in zip(bp["boxes"], colors, hatches):
             patch.set_facecolor(col)
-            patch.set_alpha(0.65)
+            patch.set_alpha(0.62)
             patch.set_edgecolor("#111111")
+            patch.set_linewidth(0.95)
+            if h_pat:
+                patch.set_hatch(h_pat)
 
         # Overlay individual 20-seed results & feasibility badges
         ab_dict = report["constraint_handling_ablation"][prob.name]
         json_names = ["Deb's Feasibility Rules", "Epsilon-Constraint", "Adaptive Penalty"]
+        all_concat = np.concatenate(data_list)
+        data_span = max(float(np.ptp(all_concat)), 1e-5)
+
         for pos, (vals, col, j_name) in enumerate(zip(data_list, colors, json_names), start=1):
             jitter = rng.uniform(-0.08, 0.08, size=len(vals))
             ax.scatter(
                 np.full_like(vals, pos) + jitter,
                 vals,
-                s=26,
+                s=28,
                 c=col,
-                edgecolor="black",
-                linewidth=0.5,
-                alpha=0.88,
+                edgecolor="#111111",
+                linewidth=0.55,
+                alpha=0.90,
                 zorder=5,
             )
             feas_pct = ab_dict[j_name]["feasibility_rate_pct"]
             med_err = ab_dict[j_name]["rel_error_median_pct"]
             ax.text(
                 pos,
-                float(np.max(vals)) + 0.04 * max(float(np.ptp( np.concatenate(data_list) )), 1e-5),
-                f"Feas: {feas_pct:.0f}%\nMed $\\Delta$: {med_err:.3f}%",
+                float(np.max(vals)) + 0.045 * data_span,
+                f"Feas.: {feas_pct:.0f}%\nMed. $\\Delta$: {med_err:.3f}%",
                 ha="center",
                 va="bottom",
                 fontsize=8.0,
-                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor=col, alpha=0.88),
+                color="#111111",
+                zorder=7,
+                bbox=dict(boxstyle="square,pad=0.24", facecolor="#FFFFFF", edgecolor=col, lw=1.05, alpha=0.95),
             )
 
         ax.axhline(
-            prob.f_opt, color="#C0392B", linestyle="--", linewidth=1.6,
-            label=f"Global Optimum $f^* = {prob.f_opt:.4f}$"
+            prob.f_opt, color="#B03A2E", linestyle="--", linewidth=1.75, zorder=4,
+            label=f"Global Optimum  $f^* = {prob.f_opt:.4f}$"
         )
         ax.set_xticks([1, 2, 3])
         ax.set_xticklabels(tick_labels)
-        ax.set_title(f"({chr(97 + idx)}) {p_name}")
+        ax.set_xlim(0.45, 3.55)
+        ax.set_title(f"({chr(97 + idx)}) {p_name}", pad=8)
         ax.set_ylabel(y_label)
-        ax.legend(loc="upper left", framealpha=0.92)
-        y_min, y_max = ax.get_ylim()
-        ax.set_ylim(y_min, y_max + 0.16 * max(y_max - y_min, 1e-5))
+        # Generous upper headroom so legend sits cleanly above all statistical badges
+        y_min_val = min(float(np.min(all_concat)), prob.f_opt) - 0.05 * data_span
+        y_max_val = float(np.max(all_concat)) + 0.34 * data_span
+        ax.set_ylim(y_min_val, y_max_val)
+        ax.legend(
+            loc="upper left",
+            fancybox=False,
+            edgecolor="#111111",
+            framealpha=0.96,
+            fontsize=8.3,
+        )
 
     fig.suptitle(
-        "Constraint-Handling Mechanism Ablation inside HEOA (20 Independent Seeds, 1,500 Evaluations)",
-        fontsize=12.5, fontweight="bold",
+        "Constraint-Handling Mechanism Ablation Inside HEOA ($20$ Independent Seeds, $1{,}500$ Evaluations)",
+        fontsize=12.6, fontweight="bold",
     )
+    _finalize_journal_figure(fig)
     out_path = assets_dir / "constraint_handling_ablation.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -508,7 +740,7 @@ def main() -> None:
         report = json.load(fp)
     traj_data = np.load(results_dir / "benchmark_trajectories.npz")
 
-    print("[EvoOpt-Figures] Rendering 4 publication-grade figures at 300 DPI...")
+    print("[EvoOpt-Figures] Rendering 4 camera-ready journal figures at 300 DPI...")
     plot_three_bar_truss_landscape(assets_dir)
     plot_surrogate_efficiency_convergence(assets_dir, report, traj_data)
     plot_pareto_frontiers(assets_dir)
