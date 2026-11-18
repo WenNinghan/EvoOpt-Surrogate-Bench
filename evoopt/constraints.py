@@ -117,7 +117,7 @@ class AdaptivePenaltyConstraintHandler(ConstraintHandler):
     """Dynamic Annealing Penalty Constraint Handler.
 
     Computes penalized fitness:
-        F_pen(x, t) = f(x) + lambda(t) * sum_j max(0, g_j(x))
+        F_pen(x, t) = f(x) + lambda(t) * (CV(x) + CV(x)^2)
     where lambda(t) = base_penalty * (1 + alpha * (t / T_max)^beta) * scale_f
     adapts automatically to objective scale and evolutionary progress.
     """

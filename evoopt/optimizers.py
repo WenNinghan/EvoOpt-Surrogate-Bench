@@ -87,10 +87,14 @@ def _logistic_chaotic_init(
     # Burn-in iterations for ergodic chaotic mixing
     for _ in range(15):
         z = mu * z * (1.0 - z)
+        z = np.where(np.abs(z - 0.5) < 1e-9, z + 1e-5, z)
+        z = np.clip(z, 1e-7, 1.0 - 1e-7)
 
     Z = np.empty((pop_size, dim), dtype=np.float64)
     for i in range(pop_size):
         z = mu * z * (1.0 - z)
+        z = np.where(np.abs(z - 0.5) < 1e-9, z + 1e-5, z)
+        z = np.clip(z, 1e-7, 1.0 - 1e-7)
         Z[i] = z
     return lb + Z * (ub - lb)
 
@@ -150,6 +154,20 @@ def _select_best_archive_solution(
     )
 
 
+def _archive_history_f(
+    f_all: np.ndarray,
+    f_best: float,
+    cv_best: float,
+    is_feasible: bool,
+) -> float:
+    """Scale-invariant trajectory objective following Deb's worst-objective offset when infeasible."""
+    if is_feasible:
+        return float(f_best)
+    f_worst = float(np.max(f_all))
+    f_scale = max(float(np.percentile(np.abs(f_all), 75)), 1e-6)
+    return f_worst + f_scale * (1.0 + float(cv_best))
+
+
 class HEOA:
     """Human Evolutionary Optimization Algorithm (HEOA).
 
@@ -202,7 +220,7 @@ class HEOA:
 
         _, f_best_cur, _, cv_best_cur, is_feas_cur = _select_best_archive_solution(X, f, G)
         history_evals = [n_evals]
-        history_f = [f_best_cur if is_feas_cur else float(np.min(f) + 1e3 * cv_best_cur)]
+        history_f = [_archive_history_f(f, f_best_cur, cv_best_cur, is_feas_cur)]
         history_cv = [cv_best_cur]
 
         snapshots: Dict[int, np.ndarray] = {0: X.copy()}
@@ -309,7 +327,7 @@ class HEOA:
             G_arch = np.vstack(eval_G_list)
             _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X_arch, f_arch, G_arch)
             history_evals.append(n_evals)
-            history_f.append(f_b if is_feas else float(np.min(f_arch) + 1e3 * cv_b))
+            history_f.append(_archive_history_f(f_arch, f_b, cv_b, is_feas))
             history_cv.append(cv_b)
 
         snapshots[gen] = X.copy()
@@ -340,14 +358,14 @@ class HEOA:
 
 
 class DifferentialEvolution:
-    """Constrained Differential Evolution (DE/rand/1/bin with SHADE-style F/CR jitter)."""
+    """Constrained Differential Evolution (Storn & Price 1997; SHADE Lehmer adaptation)."""
 
     def __init__(
         self,
         pop_size: int = 50,
         max_evals: int = 2000,
-        F: float = 0.65,
-        CR: float = 0.85,
+        F: float = 0.60,
+        CR: float = 0.90,
         adaptive: bool = True,
         constraint_handler: Union[str, ConstraintHandler] = "deb",
         seed: Optional[int] = None,
@@ -380,7 +398,7 @@ class DifferentialEvolution:
 
         _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X, f, G)
         history_evals = [n_evals]
-        history_f = [f_b if is_feas else float(np.min(f) + 1e3 * cv_b)]
+        history_f = [_archive_history_f(f, f_b, cv_b, is_feas)]
         history_cv = [cv_b]
 
         mu_F = self.F
@@ -399,7 +417,7 @@ class DifferentialEvolution:
             for i in range(batch):
                 if self.adaptive:
                     Fi = float(np.clip(rng.normal(mu_F, 0.1), 0.2, 1.0))
-                    CRi = float(np.clip(rng.normal(mu_CR, 0.1), 0.1, 1.0))
+                    CRi = float(np.clip(rng.normal(mu_CR, 0.1), 0.2, 1.0))
                 else:
                     Fi, CRi = self.F, self.CR
                 F_vals[i] = Fi
@@ -436,7 +454,9 @@ class DifferentialEvolution:
                     succ_CR.append(CR_vals[i])
 
             if self.adaptive and succ_F:
-                mu_F = 0.85 * mu_F + 0.15 * float(np.mean(succ_F))
+                sf_arr = np.asarray(succ_F, dtype=np.float64)
+                lehmer_F = float(np.sum(sf_arr * sf_arr) / np.sum(sf_arr))
+                mu_F = 0.85 * mu_F + 0.15 * lehmer_F
                 mu_CR = 0.85 * mu_CR + 0.15 * float(np.mean(succ_CR))
 
             X_arch = np.vstack(eval_X_list)
@@ -444,7 +464,7 @@ class DifferentialEvolution:
             G_arch = np.vstack(eval_G_list)
             _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X_arch, f_arch, G_arch)
             history_evals.append(n_evals)
-            history_f.append(f_b if is_feas else float(np.min(f_arch) + 1e3 * cv_b))
+            history_f.append(_archive_history_f(f_arch, f_b, cv_b, is_feas))
             history_cv.append(cv_b)
 
         X_all = np.vstack(eval_X_list)
@@ -473,23 +493,25 @@ class DifferentialEvolution:
 
 
 class ParticleSwarmOptimization:
-    """Constrained Particle Swarm Optimization (PSO) with inertia decay."""
+    """Constrained Particle Swarm Optimization (Clerc & Kennedy, IEEE TEVC 2002)."""
 
     def __init__(
         self,
         pop_size: int = 50,
         max_evals: int = 2000,
-        w_max: float = 0.90,
-        w_min: float = 0.40,
-        c1: float = 1.70,
-        c2: float = 1.70,
+        w: float = 0.7298,
+        c1: float = 1.49618,
+        c2: float = 1.49618,
+        w_max: Optional[float] = None,
+        w_min: Optional[float] = None,
         constraint_handler: Union[str, ConstraintHandler] = "deb",
         seed: Optional[int] = None,
     ) -> None:
         self.pop_size = int(pop_size)
         self.max_evals = int(max_evals)
-        self.w_max = float(w_max)
-        self.w_min = float(w_min)
+        self.w = float(w)
+        self.w_max = w_max
+        self.w_min = w_min
         self.c1 = float(c1)
         self.c2 = float(c2)
         if isinstance(constraint_handler, str):
@@ -527,13 +549,16 @@ class ParticleSwarmOptimization:
 
         _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X, f, G)
         history_evals = [n_evals]
-        history_f = [f_b if is_feas else float(np.min(f) + 1e3 * cv_b)]
+        history_f = [_archive_history_f(f, f_b, cv_b, is_feas)]
         history_cv = [cv_b]
 
         while n_evals < self.max_evals:
             batch = min(n_init, self.max_evals - n_evals)
             progress = min(1.0, n_evals / max(1, self.max_evals))
-            w = self.w_max - (self.w_max - self.w_min) * progress
+            if self.w_max is not None and self.w_min is not None:
+                w = float(self.w_max) - (float(self.w_max) - float(self.w_min)) * progress
+            else:
+                w = self.w
 
             r1 = rng.random(size=(batch, dim))
             r2 = rng.random(size=(batch, dim))
@@ -577,7 +602,7 @@ class ParticleSwarmOptimization:
             G_arch = np.vstack(eval_G_list)
             _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X_arch, f_arch, G_arch)
             history_evals.append(n_evals)
-            history_f.append(f_b if is_feas else float(np.min(f_arch) + 1e3 * cv_b))
+            history_f.append(_archive_history_f(f_arch, f_b, cv_b, is_feas))
             history_cv.append(cv_b)
 
         X_all = np.vstack(eval_X_list)
@@ -823,6 +848,7 @@ class NSGA2:
         self,
         problem: MultiObjectiveProblem,
         track_hv: bool = True,
+        init_X: Optional[np.ndarray] = None,
     ) -> MultiObjectiveResult:
         rng = np.random.default_rng(self.seed)
         lb, ub = problem.lb, problem.ub
@@ -830,6 +856,10 @@ class NSGA2:
 
         n_pop = min(self.pop_size, self.max_evals)
         X = rng.uniform(lb, ub, size=(n_pop, dim))
+        if init_X is not None and len(init_X) > 0:
+            X_seed = np.clip(np.asarray(init_X, dtype=np.float64), lb, ub)
+            n_seed = min(len(X_seed), n_pop)
+            X[:n_seed] = X_seed[:n_seed]
         F, G = problem.evaluate(X)
         n_evals = n_pop
 
@@ -1009,7 +1039,8 @@ class MOEAD:
         n_evals = n_pop
 
         feas = cv <= 0.0
-        if np.any(feas):
+        has_feas_ideal = bool(np.any(feas))
+        if has_feas_ideal:
             z_ideal = np.min(F[feas], axis=0)
             z_nadir = np.max(F[feas], axis=0)
         else:
@@ -1021,13 +1052,20 @@ class MOEAD:
         eval_G_list = [G.copy()]
 
         history_evals = [n_evals]
-        if track_hv and np.any(feas):
+        if track_hv and has_feas_ideal:
             _, F_p0, _ = _extract_feasible_pareto(X, F, G)
             history_hv = [compute_hypervolume(F_p0, problem.ref_point)]
         else:
             history_hv = [0.0]
 
         while n_evals < self.max_evals:
+            feas_cur = cv <= 0.0
+            if np.any(feas_cur):
+                F_fc = F[feas_cur]
+                z_nadir = np.percentile(F_fc, 90, axis=0)
+            else:
+                z_nadir = np.percentile(F, 90, axis=0)
+
             batch = min(n_pop, self.max_evals - n_evals)
             perm = rng.permutation(n_pop)[:batch]
 
@@ -1041,9 +1079,13 @@ class MOEAD:
                     pool = np.arange(n_pop)
                 parent_pools.append(pool)
                 p1_idx, p2_idx = rng.choice(pool, size=2, replace=False)
-                c1, _ = sbx_crossover(
-                    X[p1_idx], X[p2_idx], lb, ub, rng, eta_c=self.eta_c, prob_c=1.0
-                )
+                if rng.random() < 0.5:
+                    c1 = X[i] + 0.5 * (X[p1_idx] - X[p2_idx])
+                    c1 = _repair_bounds(c1, X[i], lb, ub)
+                else:
+                    c1, _ = sbx_crossover(
+                        X[p1_idx], X[p2_idx], lb, ub, rng, eta_c=self.eta_c, prob_c=1.0
+                    )
                 c1 = polynomial_mutation(c1, lb, ub, rng, eta_m=self.eta_m)
                 X_children[k] = c1
 
@@ -1060,9 +1102,13 @@ class MOEAD:
                 g_y = G_children[k]
                 cv_y = float(cv_children[k])
                 if cv_y <= 0.0:
-                    z_ideal = np.minimum(z_ideal, f_y)
-                    z_nadir = np.maximum(z_nadir, f_y)
-                else:
+                    if not has_feas_ideal:
+                        z_ideal = f_y.copy()
+                        z_nadir = np.maximum(f_y + 1.0, z_nadir)
+                        has_feas_ideal = True
+                    else:
+                        z_ideal = np.minimum(z_ideal, f_y)
+                elif not has_feas_ideal:
                     z_ideal = np.minimum(z_ideal, f_y)
 
                 scale = np.maximum(z_nadir - z_ideal, 1e-6)
@@ -1078,8 +1124,10 @@ class MOEAD:
                     elif cv_y > 0.0 and cv_j > 0.0:
                         replace = cv_y < cv_j
                     elif cv_y <= 0.0 and cv_j <= 0.0:
-                        tch_y = float(np.max(W[j] * np.abs(f_y - z_ideal) / scale))
-                        tch_j = float(np.max(W[j] * np.abs(F[j] - z_ideal) / scale))
+                        norm_y = np.abs(f_y - z_ideal) / scale
+                        norm_j = np.abs(F[j] - z_ideal) / scale
+                        tch_y = float(np.max(W[j] * norm_y) + 1e-3 * np.sum(norm_y))
+                        tch_j = float(np.max(W[j] * norm_j) + 1e-3 * np.sum(norm_j))
                         replace = tch_y <= tch_j
                     if replace:
                         X[j] = X_children[k]

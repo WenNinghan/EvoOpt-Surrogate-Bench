@@ -12,6 +12,9 @@ Verifies:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -35,18 +38,28 @@ def test_three_bar_truss_analytical_optimum():
 def test_spring_vessel_and_welded_beam_optima():
     spring = eo.TensionCompressionSpring()
     f_s, g_s = spring.evaluate(spring.x_opt)
-    assert np.isclose(f_s, 0.01266523, atol=1e-6)
-    assert np.all(g_s <= 1e-6)
+    assert np.isclose(f_s, 0.0126652328, atol=1e-8)
+    assert np.all(g_s <= 0.0), f"Spring x_opt must be strictly feasible, got g={g_s}"
+    assert eo.compute_cv(g_s) == 0.0
 
-    vessel = eo.PressureVessel(discrete_thickness=False)
-    f_v, g_v = vessel.evaluate(vessel.x_opt)
-    assert np.isclose(f_v, 5885.3327736, atol=1e-4)
-    assert np.all(g_v <= 1e-6)
+    vessel_cont = eo.PressureVessel(discrete_thickness=False)
+    f_vc, g_vc = vessel_cont.evaluate(vessel_cont.x_opt)
+    assert np.isclose(f_vc, 5885.3327736, atol=1e-6)
+    assert np.all(g_vc <= 0.0)
+    assert eo.compute_cv(g_vc) == 0.0
+
+    vessel_disc = eo.PressureVessel(discrete_thickness=True)
+    f_vd, g_vd = vessel_disc.evaluate(vessel_disc.x_opt)
+    assert np.isclose(f_vd, 6059.71433505, atol=1e-6)
+    assert np.isclose(f_vd, vessel_disc.f_opt, atol=1e-10)
+    assert np.all(g_vd <= 0.0)
+    assert eo.compute_cv(g_vd) == 0.0
 
     beam = eo.WeldedBeam()
     f_b, g_b = beam.evaluate(beam.x_opt)
-    assert np.isclose(f_b, 1.7248523, atol=1e-5)
-    assert np.all(g_b <= 1e-5)
+    assert np.isclose(f_b, 1.7248523086, atol=1e-8)
+    assert np.all(g_b <= 0.0)
+    assert eo.compute_cv(g_b) == 0.0
 
 
 def test_aop_ozonation_kinetics_and_bromate_constraint():
@@ -58,18 +71,34 @@ def test_aop_ozonation_kinetics_and_bromate_constraint():
     assert diag_u["bromate_ug_L"] > 10.0
     assert g_u[0] > 0.0
 
-    # Moderate O3 with peroxone H2O2 dosing at neutral pH should satisfy [BrO3-] <= 10 ug/L
-    x_safe = np.array([7.0, 4.5, 0.55, 15.0])
+    # Excess H2O2 (r = 1.2 > 0.60 stoichiometric limit) at high O3 persists in effluent (g3 > 0)
+    x_excess_h2o2 = np.array([8.5, 11.5, 1.2, 30.0])
+    _, g_ex = aop.evaluate(x_excess_h2o2)
+    diag_ex = aop.evaluate_diagnostics(x_excess_h2o2)
+    assert diag_ex["h2o2_res_mg_L"] > 3.5
+    assert g_ex[2] > 0.0
+
+    # Moderate O3 with peroxone H2O2 dosing at neutral pH satisfies all constraints
+    x_safe = np.array([7.2, 4.2, 0.55, 16.0])
     f_s, g_s = aop.evaluate(x_safe)
     diag_s = aop.evaluate_diagnostics(x_safe)
     assert diag_s["bromate_ug_L"] <= 10.0
     assert np.all(g_s <= 0.0)
     assert 0.65 <= diag_s["eta_removal"] < 1.0
+    # Verify exact Bolton (2001) IUPAC EE/O = E_elec / log10(C0 / Ct)
+    log10_removal = -np.log10(diag_s["f1_residual"])
+    assert np.isclose(diag_s["eeo_kwh_m3_order"], diag_s["energy_kwh_m3"] / log10_removal, rtol=1e-10)
 
     pf = aop.pareto_front(n_points=60)
     assert pf.shape == (60, 2)
     assert np.all(np.diff(pf[:, 0]) > 0)
     assert np.all(np.diff(pf[:, 1]) <= 1e-8)
+
+    # Verify OSY 5-region Deb (2002) analytical Pareto front coverage
+    osy = eo.OSY()
+    pf_osy = osy.pareto_front(n_points=120)
+    assert pf_osy[0, 0] <= -273.5 and pf_osy[-1, 0] >= -43.0
+    assert pf_osy[-1, 1] <= 4.1 and pf_osy[0, 1] >= 75.5
 
 
 # ==============================================================================
@@ -196,7 +225,7 @@ def test_surrogates_and_acquisition_criteria():
     ])
 
     for surr in [
-        eo.GaussianProcessSurrogate(lb, ub, seed=7),
+        eo.GaussianProcessSurrogate(lb, ub, n_restarts=2, seed=7),
         eo.DeepEnsembleSurrogate(lb, ub, n_members=4, epochs=120, seed=7),
     ]:
         surr.fit(X_train, Y_train)
@@ -210,6 +239,40 @@ def test_surrogates_and_acquisition_criteria():
         )
         assert cei.shape == (5,)
         assert np.all(cei >= 0.0)
+
+
+def test_de_pso_and_moead_baselines():
+    truss = eo.ThreeBarTruss()
+    de_res = eo.DE(pop_size=40, max_evals=1200, seed=5).optimize(truss)
+    pso_res = eo.PSO(pop_size=40, max_evals=1200, seed=5).optimize(truss)
+    assert de_res.is_feasible and abs(de_res.f_best - truss.f_opt) < 0.05
+    assert pso_res.is_feasible and abs(pso_res.f_best - truss.f_opt) < 0.25
+
+    zdt1 = eo.ZDT1(dim=8)
+    moead_res = eo.MOEAD(pop_size=60, max_evals=1800, seed=3).optimize(zdt1, track_hv=False)
+    hv_m = eo.compute_hypervolume(moead_res.F_pareto, zdt1.ref_point)
+    assert hv_m > 0.78
+    # Verify MOEA/D covers the full [0, 1] Pareto front including f1 > 0.85
+    assert np.max(moead_res.F_pareto[:, 0]) > 0.85
+
+
+def test_sa_heoa_deep_ensemble_pure_budget():
+    prob = eo.ThreeBarTruss()
+    budget = 72
+    sa_dens = eo.SurrogateAssistedHEOA(
+        max_evals=budget,
+        n_init=24,
+        surrogate_type="deep_ensemble",
+        infill_per_iter=12,
+        inner_pop_size=24,
+        inner_max_evals=192,
+        seed=11,
+    )
+    res = sa_dens.optimize(prob)
+    assert res.algorithm == "SA-HEOA-DEns"
+    assert res.n_evals == budget
+    assert len(res.evaluated_X) == budget
+    assert res.is_feasible
 
 
 def test_sa_heoa_strict_budget_and_efficiency():
@@ -244,3 +307,35 @@ def test_sa_nsga2_budget_and_bromate_compliance():
     assert np.all(res.G_pareto <= 1e-9)
     hv = eo.compute_hypervolume(res.F_pareto, aop.ref_point)
     assert hv > 0.03
+
+
+def test_held_out_benchmark_protocol_and_archived_fronts():
+    path = Path(__file__).resolve().parents[1] / "results" / "small_budget_tuning.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    assert set(report["test_seeds"]).isdisjoint(report["tuning_seeds"])
+    problems = {"aop_ozonation": eo.AOPOzonationKineticsMOO(), "zdt1": eo.ZDT1(dim=8), "zdt3": eo.ZDT3(dim=8)}
+    fronts = {k: prob.pareto_front(n_points=250) for k, prob in problems.items()}
+    for problem_name, selections in report["selections"].items():
+        for alg, selection in selections.items():
+            grid = report["candidate_grid"][alg]
+            tuning = [r for r in report["tuning_runs"] if r["problem"] == problem_name and r["algorithm"] == alg]
+            scores = []
+            for candidate in grid:
+                matches = [r for r in tuning if r["parameters"] == candidate]
+                assert sorted(r["seed"] for r in matches) == report["tuning_seeds"]
+                scores.append(np.mean([r["hv_ratio_pct"] for r in matches]))
+            assert grid[int(np.argmax(scores))] == selection["parameters"]
+    for row in report["test_runs"]:
+        problem = problems[row["problem"]]
+        if row["configuration"] == "tuned":
+            assert row["parameters"] == report["selections"][row["problem"]][row["algorithm"]]["parameters"]
+        assert row["seed"] in report["test_seeds"]
+        assert row["n_evals"] == report["budget_per_run"]
+        if not row["n_feasible_pareto"]:
+            assert row["hv"] == 0 and row["igd"] is None
+            continue
+        objectives, constraints = problem.evaluate(np.asarray(row["front_x"]))
+        np.testing.assert_allclose(objectives, row["front_f"], rtol=1e-10, atol=1e-12)
+        assert np.all(eo.compute_cv(constraints) <= 0)
+        assert eo.compute_hypervolume(objectives, problem.ref_point) == pytest.approx(row["hv"])
+        assert eo.compute_igd(objectives, fronts[row["problem"]]) == pytest.approx(row["igd"])

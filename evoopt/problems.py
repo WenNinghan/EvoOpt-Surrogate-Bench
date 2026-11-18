@@ -126,23 +126,26 @@ class ThreeBarTruss(BenchmarkProblem):
 
 
 class TensionCompressionSpring(BenchmarkProblem):
-    """Tension/Compression Spring Design Problem.
+    """Tension/Compression Spring Design Problem (Belegundu 1982; Arora 1989; Coello 2000).
 
     Minimizes the weight of a tension/compression spring subject to constraints on
     minimum deflection, shear stress, surge frequency, and outside diameter.
 
     Variables:
-        x_1 = d in [0.05, 2.0]   (wire diameter)
-        x_2 = D in [0.25, 1.3]   (mean coil diameter)
+        x_1 = d in [0.05, 2.0]   (wire diameter, in.)
+        x_2 = D in [0.25, 1.3]   (mean coil diameter, in.)
         x_3 = N in [2.0, 15.0]   (number of active coils)
 
-    Literature optimum:
-        x* = (0.0516890614, 0.3567177469, 11.2889653382)
-        f(x*) = 0.0126652328
+    Exact KKT global optimum (g_1(x*) = 0, g_2(x*) = 0):
+        x* = (0.051689061106254736, 0.3567177403645793, 11.28896571848103)
+        f(x*) = 0.012665232788319415
     """
 
     def __init__(self) -> None:
-        x_opt = np.array([0.0516890614, 0.3567177469, 11.2889653382])
+        x_opt = np.array(
+            [0.051689061106254736, 0.3567177403645793, 11.28896571848103],
+            dtype=np.float64,
+        )
         f_opt = (x_opt[2] + 2.0) * x_opt[1] * (x_opt[0] ** 2)
         super().__init__(
             name="Tension/Compression Spring",
@@ -172,16 +175,16 @@ class TensionCompressionSpring(BenchmarkProblem):
 
 
 class PressureVessel(BenchmarkProblem):
-    """Cylindrical Pressure Vessel Design Problem.
+    """Cylindrical Pressure Vessel Design Problem (Sandgren 1990; Kannan & Kramer 1994; Coello 2000).
 
     Minimizes the total manufacturing cost (material, forming, and welding)
     of a cylindrical pressure vessel capped at both ends by hemispherical heads.
 
     Variables:
-        x_1 = T_s in [0.0625, 6.1875] (shell thickness, in.)
-        x_2 = T_h in [0.0625, 6.1875] (head thickness, in.)
+        x_1 = T_s in [0.0625, 6.1875] (shell thickness, in.; discrete variant: multiples of 0.0625 in.)
+        x_2 = T_h in [0.0625, 6.1875] (head thickness, in.; discrete variant: multiples of 0.0625 in.)
         x_3 = R   in [10.0, 200.0]    (inner radius, in.)
-        x_4 = L   in [10.0, 200.0]    (cylindrical shell length, in.)
+        x_4 = L   in [10.0, 200.0]    (cylindrical shell length, in.; standard Coello box bound L <= 200)
 
     Formulation:
         min f(x) = 0.6224*x_1*x_3*x_4 + 1.7781*x_2*x_3^2 + 3.1661*x_1^2*x_4 + 19.84*x_1^2*x_3
@@ -189,27 +192,39 @@ class PressureVessel(BenchmarkProblem):
             g_1(x) = -x_1 + 0.0193*x_3 <= 0
             g_2(x) = -x_2 + 0.00954*x_3 <= 0
             g_3(x) = -pi*x_3^2*x_4 - (4/3)*pi*x_3^3 + 1296000 <= 0
-            g_4(x) = x_4 - 240 <= 0
+            g_4(x) = x_4 - 240 <= 0  (ASME boiler code length limit; inactive on L <= 200)
+
+    Exact Global Optima (for L in [10, 200]):
+        - Continuous relaxation (`discrete_thickness=False`):
+          x* = (0.7781686414, 0.3846491626, 40.3196187241, 200.0), f* = 5885.3327736165
+        - Discrete steel plate thickness (`discrete_thickness=True`, x_1, x_2 in 0.0625 * Z):
+          x* = (0.8125, 0.4375, 42.0984455959, 176.6365958424), f* = 6059.7143350484
     """
 
     def __init__(self, discrete_thickness: bool = False) -> None:
         self.discrete_thickness = discrete_thickness
         if discrete_thickness:
-            x_opt = np.array([0.8125, 0.4375, 42.0984456, 176.6365958])
-            f_opt = 6059.714335
+            x1_opt = 13.0 * 0.0625  # 0.8125 in.
+            x2_opt = 7.0 * 0.0625   # 0.4375 in.
+            x3_opt = x1_opt / 0.0193
+            x4_opt = (1296000.0 - (4.0 / 3.0) * np.pi * (x3_opt ** 3)) / (
+                np.pi * (x3_opt ** 2)
+            )
+            x_opt = np.array([x1_opt, x2_opt, x3_opt, x4_opt], dtype=np.float64)
         else:
             x4_opt = 200.0
             roots = np.roots([4.0 / 3.0 * np.pi, 200.0 * np.pi, 0.0, -1296000.0])
             x3_opt = float(np.real(roots[np.isreal(roots) & (np.real(roots) > 0)][0]))
             x1_opt = 0.0193 * x3_opt
             x2_opt = 0.00954 * x3_opt
-            x_opt = np.array([x1_opt, x2_opt, x3_opt, x4_opt])
-            f_opt = (
-                0.6224 * x1_opt * x3_opt * x4_opt
-                + 1.7781 * x2_opt * (x3_opt ** 2)
-                + 3.1661 * (x1_opt ** 2) * x4_opt
-                + 19.84 * (x1_opt ** 2) * x3_opt
-            )
+            x_opt = np.array([x1_opt, x2_opt, x3_opt, x4_opt], dtype=np.float64)
+
+        f_opt = (
+            0.6224 * x_opt[0] * x_opt[2] * x_opt[3]
+            + 1.7781 * x_opt[1] * (x_opt[2] ** 2)
+            + 3.1661 * (x_opt[0] ** 2) * x_opt[3]
+            + 19.84 * (x_opt[0] ** 2) * x_opt[2]
+        )
 
         super().__init__(
             name="Pressure Vessel",
@@ -246,7 +261,7 @@ class PressureVessel(BenchmarkProblem):
 
 
 class WeldedBeam(BenchmarkProblem):
-    """Welded Beam Structural Design Problem (Coello / Deb Formulation).
+    """Welded Beam Structural Design Problem (Ragsdell & Phillips 1976; Coello 2000; Deb 2000).
 
     Minimizes fabrication cost of a welded cantilever beam subject to constraints
     on weld shear stress, beam bending stress, buckling load, end deflection,
@@ -258,14 +273,25 @@ class WeldedBeam(BenchmarkProblem):
         x_3 = t in [0.1, 10.0]   (beam height, in.)
         x_4 = b in [0.1, 2.0]    (beam width, in.)
 
-    Literature optimum:
-        x* = (0.2057296398, 3.4704886656, 9.0366239104, 0.2057296398)
-        f(x*) = 1.7248523086
+    Exact KKT global optimum (g_1 = g_2 = g_3 = g_7 = 0):
+        x* = (0.2057296397860795, 3.4704886656280016, 9.036623910357633, 0.2057296397860795)
+        f(x*) = 1.7248523085973648
     """
 
     def __init__(self) -> None:
-        x_opt = np.array([0.2057296398, 3.4704886656, 9.0366239104, 0.2057296398])
-        f_opt = 1.10471 * (x_opt[0] ** 2) * x_opt[1] + 0.04811 * x_opt[2] * x_opt[3] * (14.0 + x_opt[1])
+        x_opt = np.array(
+            [
+                0.2057296397860795,
+                3.4704886656280016,
+                9.036623910357633,
+                0.2057296397860795,
+            ],
+            dtype=np.float64,
+        )
+        f_opt = (
+            1.10471 * (x_opt[0] ** 2) * x_opt[1]
+            + 0.04811 * x_opt[2] * x_opt[3] * (14.0 + x_opt[1])
+        )
         super().__init__(
             name="Welded Beam",
             dim=4,
@@ -405,7 +431,15 @@ class ChemicalReactionKineticsMOO(MultiObjectiveProblem):
         )
 
     def evaluate_diagnostics(self, X: np.ndarray) -> Dict[str, np.ndarray]:
-        """Compute mechanistic kinetic exposures, removal, EE/O, and bromate formation."""
+        """Compute plug-flow AOP kinetic exposures, removal, Bolton EE/O, and bromate.
+
+        References:
+          - von Gunten (2003a,b), Water Research 37(7), 1443-1467 & 1469-1487 (O3/H2O2 & BrO3-).
+          - Elovitz & von Gunten (1999), Ozone Sci. Eng. 21(3), 239-260 (R_ct radical concept).
+          - Bolton et al. (2001), Pure Appl. Chem. 73(4), 627-637 (IUPAC EE/O definition).
+          - Katsoyiannis et al. (2011), Environ. Sci. Technol. 45(18), 7922-7929;
+            Miklos et al. (2018), Water Research 139, 118-131 (O3 & H2O2 specific energy).
+        """
         arr = np.asarray(X, dtype=np.float64)
         is_1d = arr.ndim == 1
         if is_1d:
@@ -416,45 +450,60 @@ class ChemicalReactionKineticsMOO(MultiObjectiveProblem):
         r = np.clip(arr[:, 2], 0.0, None)
         t = np.clip(arr[:, 3], 0.1, None)
 
-        # OH- and HO2- accelerated ozone decomposition rate constant k_d (min^-1)
+        # 1. OH- and HO2- accelerated PFR ozone decay rate constant k_d (min^-1) at 20 C
         k_d = 0.045 * (10.0 ** (0.22 * (pH - 7.0))) * (1.0 + 2.4 * r)
+        conv_o3 = 1.0 - np.exp(-k_d * t)
 
-        # Effective oxidant exposure with NOM/carbonate radical scavenging saturation
-        ox_eff = O3 / (1.0 + 0.28 * O3)
-        E_O3 = ox_eff * (1.0 - np.exp(-k_d * t)) / (k_d * 4.5)
+        # 2. Effective dissolved ozone & integrated PFR exposures (direct O3 + R_ct *OH)
+        ox_eff = O3 / (1.0 + 0.25 * O3)
+        E_O3 = ox_eff * conv_o3 / (k_d * 4.5)
 
-        # Peroxone radical yield (peaks near r ~ 0.45-0.75; excess H2O2 scavenges *OH)
-        phi_peroxone = 1.0 + 1.8 * r * np.exp(-1.3 * r)
+        # Peroxone *OH yield peaks near molar H2O2/O3 ~ 0.5-0.75; excess H2O2 scavenges *OH
+        phi_peroxone = 1.0 + 2.0 * r * np.exp(-1.35 * r)
+        # Alkaline OH- initiates *OH, while pH > 8.1 increases CO3^2- radical scavenging
         phi_pH = (10.0 ** (0.18 * (pH - 7.0))) * np.exp(-0.07 * ((pH - 8.1) ** 2))
 
-        psi = (
-            0.22 * E_O3
-            + 0.44 * ox_eff * (1.0 - np.exp(-1.25 * k_d * t)) * phi_peroxone * phi_pH
-        )
+        psi = 0.22 * E_O3 + 0.44 * ox_eff * conv_o3 * phi_peroxone * phi_pH
         residual_fraction = np.exp(-psi)
         eta = 1.0 - residual_fraction
 
-        # Carcinogenic bromate [BrO3-] (ug/L): promoted by O3 & alkaline OBr-, suppressed by H2O2
+        # 3. Carcinogenic bromate [BrO3-] (ug/L) in bromide-containing surface water:
+        # Promoted by O3 + alkaline OBr- (pKa = 8.8), suppressed by H2O2/HO2- reduction of HOBr
         bromate_ug_L = (
             2.4
             * (O3 ** 1.48)
             * (10.0 ** (0.42 * (pH - 7.0)))
-            * (1.0 - np.exp(-0.90 * k_d * t))
+            * conv_o3
             * np.exp(-2.30 * r)
         )
 
-        # Residual H2O2 in reactor effluent (mg/L)
-        h2o2_res_mg_L = (34.0 / 48.0) * r * O3 * np.exp(-0.35 * k_d * t)
+        # 4. Stoichiometric mass-conserving effluent residual H2O2 (mg/L):
+        # Peroxone stoichiometry (2 O3 + H2O2 -> 2 *OH + 3 O2 + radical quenching) consumes at
+        # most nu_max = 0.60 mol H2O2 per mol decomposed O3; excess H2O2 persists in effluent.
+        mw_ratio = 34.0147 / 47.9982  # M(H2O2) / M(O3) [g/mol / g/mol]
+        delta_rxn = 0.60 * conv_o3
+        kap_h = 0.06
+        delta_u = 0.5 * (
+            r
+            + delta_rxn
+            + kap_h
+            - np.sqrt((r + delta_rxn + kap_h) ** 2 - 4.0 * r * delta_rxn)
+        )
+        u_res = np.maximum(0.0, r - delta_u)
+        h2o2_res_mg_L = mw_ratio * O3 * u_res
 
-        # Specific electrical + chemical oxidant energy (kWh / m^3) & EE/O (kWh / m^3 / order)
+        # 5. Bolton et al. (2001) IUPAC Electrical Energy per Order EE/O [kWh m^-3 order^-1]:
+        # Specific O3 energy = 15 kWh/kg O3 (with high-dose mass-transfer slip),
+        # Embodied H2O2 energy = 12 kWh/kg H2O2, plus pH conditioning & contactor hydraulics.
+        c_h2o2_init = mw_ratio * r * O3
         E_elec = (
-            0.015 * (O3 ** 1.18)
-            + 0.019 * r * O3
+            0.015 * O3 * (1.0 + 0.025 * O3)
+            + 0.012 * c_h2o2_init
             + 0.014 * ((pH - 7.5) ** 2)
             + 0.00035 * t
         )
-        log_orders = np.maximum(psi / np.log(10.0), 0.10)
-        eeo = E_elec / log_orders
+        log10_orders = np.maximum(psi / np.log(10.0), 1e-3)
+        eeo = E_elec / log10_orders
 
         out = {
             "f1_residual": residual_fraction,
@@ -482,10 +531,10 @@ class ChemicalReactionKineticsMOO(MultiObjectiveProblem):
         return F, G
 
     def _compute_grid_pf(self, enforce_bromate: bool, n_points: int) -> np.ndarray:
-        ph_grid = np.linspace(5.5, 8.8, 28)
-        o3_grid = np.linspace(0.8, 12.0, 40)
-        r_grid = np.linspace(0.0, 1.2, 30)
-        t_grid = np.linspace(4.0, 30.0, 22)
+        ph_grid = np.linspace(self.lb[0], self.ub[0], 30)
+        o3_grid = np.linspace(self.lb[1], self.ub[1], 42)
+        r_grid = np.linspace(self.lb[2], self.ub[2], 32)
+        t_grid = np.linspace(self.lb[3], self.ub[3], 26)
 
         PP, OO, RR, TT = np.meshgrid(ph_grid, o3_grid, r_grid, t_grid, indexing="ij")
         X_grid = np.column_stack([PP.ravel(), OO.ravel(), RR.ravel(), TT.ravel()])
@@ -493,18 +542,43 @@ class ChemicalReactionKineticsMOO(MultiObjectiveProblem):
         if enforce_bromate:
             mask = np.all(G <= 0.0, axis=1)
         else:
-            mask = G[:, 1] <= 0.0  # Only require eta >= 0.65, ignore bromate limit
+            mask = (G[:, 1] <= 0.0) & (G[:, 2] <= 0.0)
+        X_feas = X_grid[mask]
         F_feas = F[mask]
 
         order = np.argsort(F_feas[:, 0])
         F_sorted = F_feas[order]
+        X_sorted = X_feas[order]
         keep = [0]
         min_f2 = F_sorted[0, 1]
         for idx in range(1, len(F_sorted)):
-            if F_sorted[idx, 1] < min_f2 - 1e-6:
+            if F_sorted[idx, 1] < min_f2 - 1e-7:
                 keep.append(idx)
                 min_f2 = F_sorted[idx, 1]
-        pf = F_sorted[keep]
+
+        # Local sub-grid coordinate refinement around non-dominated seeds
+        X_seeds = X_sorted[keep]
+        rng = np.random.default_rng(12345)
+        span = self.ub - self.lb
+        X_local_list = [X_seeds]
+        for scale in (0.025, 0.008, 0.002):
+            noise = rng.normal(0.0, scale, size=(24, len(X_seeds), self.dim)) * span
+            X_pert = np.clip(X_seeds[np.newaxis, :, :] + noise, self.lb, self.ub).reshape(-1, self.dim)
+            X_local_list.append(X_pert)
+        X_ref = np.vstack(X_local_list)
+        F_ref, G_ref = self._evaluate_batch(X_ref)
+        ref_mask = np.all(G_ref <= 0.0, axis=1) if enforce_bromate else ((G_ref[:, 1] <= 0.0) & (G_ref[:, 2] <= 0.0))
+        F_cand = np.vstack([F_sorted[keep], F_ref[ref_mask]])
+
+        ord2 = np.argsort(F_cand[:, 0])
+        F_c_sorted = F_cand[ord2]
+        keep2 = [0]
+        mf2 = F_c_sorted[0, 1]
+        for idx in range(1, len(F_c_sorted)):
+            if F_c_sorted[idx, 1] < mf2 - 1e-8:
+                keep2.append(idx)
+                mf2 = F_c_sorted[idx, 1]
+        pf = F_c_sorted[keep2]
 
         f1_interp = np.linspace(pf[0, 0], pf[-1, 0], n_points)
         f2_interp = np.interp(f1_interp, pf[:, 0], pf[:, 1])
@@ -671,16 +745,46 @@ class OSY(MultiObjectiveProblem):
         G = np.column_stack([g1, g2, g3, g4, g5, g6])
         return F, G
 
-    def pareto_front(self, n_points: int = 100) -> np.ndarray:
-        x3 = np.linspace(1.0, 5.0, n_points)
-        x1 = np.full_like(x3, 5.0)
-        x2 = np.full_like(x3, 1.0)
-        x4 = np.zeros_like(x3)
-        x5 = np.ones_like(x3)
-        x6 = np.zeros_like(x3)
-        X = np.column_stack([x1, x2, x3, x4, x5, x6])
-        F, _ = self._evaluate_batch(X)
-        return F[np.argsort(F[:, 0])]
+    def pareto_front(self, n_points: int = 200) -> np.ndarray:
+        """Exact 5-region analytical Pareto front (Deb et al., IEEE TEVC 2002, Table II)."""
+        k = max(60, n_points)
+        t = np.linspace(0.0, 1.0, k)
+        # Region AB: x1=5, x2=1, x3 in [1,5], x4=0, x5=5, x6=0
+        X_ab = np.column_stack(
+            [np.full(k, 5.0), np.ones(k), 1.0 + 4.0 * t, np.zeros(k), np.full(k, 5.0), np.zeros(k)]
+        )
+        # Region BC: x1=5, x2=1, x3 in [1,5], x4=0, x5=1, x6=0
+        X_bc = np.column_stack(
+            [np.full(k, 5.0), np.ones(k), 1.0 + 4.0 * t, np.zeros(k), np.ones(k), np.zeros(k)]
+        )
+        # Region CD: x1 in [4.056, 5.0], x2=(x1-2)/3, x3=1, x4=0, x5=1, x6=0
+        x1_cd = np.linspace(2.0, 5.0, k)
+        X_cd = np.column_stack(
+            [x1_cd, (x1_cd - 2.0) / 3.0, np.ones(k), np.zeros(k), np.ones(k), np.zeros(k)]
+        )
+        # Region DE: x1=0, x2=2, x3 in [1, 3.732], x4=0, x5=1, x6=0
+        X_de = np.column_stack(
+            [np.zeros(k), np.full(k, 2.0), 1.0 + 4.0 * t, np.zeros(k), np.ones(k), np.zeros(k)]
+        )
+        # Region EF: x1 in [0, 1], x2=2-x1, x3=1, x4=0, x5=1, x6=0
+        x1_ef = np.linspace(0.0, 2.0, k)
+        X_ef = np.column_stack(
+            [x1_ef, 2.0 - x1_ef, np.ones(k), np.zeros(k), np.ones(k), np.zeros(k)]
+        )
+        X_all = np.vstack([X_ab, X_bc, X_cd, X_de, X_ef])
+        F_all, G_all = self._evaluate_batch(X_all)
+        F_feas = F_all[np.all(G_all <= 1e-12, axis=1)]
+        order = np.argsort(F_feas[:, 0])
+        F_sorted = F_feas[order]
+        keep = [0]
+        min_f2 = F_sorted[0, 1]
+        for idx in range(1, len(F_sorted)):
+            if F_sorted[idx, 1] < min_f2 - 1e-9:
+                keep.append(idx)
+                min_f2 = F_sorted[idx, 1]
+        pf = F_sorted[keep]
+        sel = np.linspace(0, len(pf) - 1, n_points, dtype=int)
+        return pf[sel]
 
 
 def get_problem(name: str):

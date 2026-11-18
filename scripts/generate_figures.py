@@ -1,11 +1,12 @@
 """
 Top-Journal / CCF-A Camera-Ready Figure Generator for EvoOpt-Surrogate-Bench (300 DPI).
 
-Generates 4 multi-panel publication figures in assets/ (SIAM / IEEE TEVC / ESWA style):
+Generates the main benchmark figures and the held-out tuning comparison in assets/:
   1. assets/three_bar_truss_landscape_and_trajectory.png
   2. assets/surrogate_efficiency_convergence.png
   3. assets/pareto_frontier_chemical_and_zdt.png
   4. assets/constraint_handling_ablation.png
+  5. assets/small_budget_tuning.png (when the tuning experiment has run)
 """
 
 from __future__ import annotations
@@ -208,10 +209,10 @@ def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
     G3 = g_raw[:, 2].reshape(n_grid, n_grid)
     feas_mask = (G1 <= 0.0) & (G2 <= 0.0) & (G3 <= 0.0)
 
-    # Run representative HEOA (1,500 evals) & SA-HEOA (160 evals)
-    heoa_res = eo.HEOA(pop_size=45, max_evals=1500, seed=7).optimize(prob)
+    # Run representative HEOA (1,500 evals) & SA-HEOA (160 evals) matching benchmark hyperparameters
+    heoa_res = eo.HEOA(pop_size=50, max_evals=1500, seed=7).optimize(prob)
     sa_res = eo.SurrogateAssistedHEOA(
-        max_evals=160, n_init=24, surrogate_type="gp", infill_per_iter=4, seed=7
+        max_evals=160, n_init=24, surrogate_type="gp", infill_per_iter=6, seed=7
     ).optimize(prob)
 
     fig, axes = plt.subplots(1, 2, figsize=(13.6, 5.8), constrained_layout=True)
@@ -325,8 +326,8 @@ def plot_three_bar_truss_landscape(assets_dir: Path) -> None:
         )
         ax.set_xlabel("Cross-Sectional Area $x_1 = A_1 = A_3$ [$\\mathrm{cm}^2$]")
         ax.set_ylabel("Cross-Sectional Area $x_2 = A_2$ [$\\mathrm{cm}^2$]")
-        ax.set_xlim(0.02, 1.0)
-        ax.set_ylim(0.02, 1.0)
+        ax.set_xlim(0.015, 1.015)
+        ax.set_ylim(0.015, 1.015)
 
         if idx_ax == 0:
             cbar_f = fig.colorbar(cf, ax=ax, fraction=0.045, pad=0.025)
@@ -351,7 +352,7 @@ def plot_surrogate_efficiency_convergence(
     report: dict,
     traj_data: np.lib.npyio.NpzFile,
 ) -> None:
-    """Figure 2: Convergence vs. True Function Evaluations Highlighting 89.3% Savings."""
+    """Figure 2: objective gap as a function of evaluations under fixed budgets."""
     problems = [
         ("three_bar_truss", "Three-Bar Truss ($D = 2,\\; m = 3$)"),
         ("tension_compression_spring", "Tension/Compression Spring ($D = 3,\\; m = 4$)"),
@@ -369,9 +370,9 @@ def plot_surrogate_efficiency_convergence(
 
     # Custom non-overlapping callout text positions in the open lower pocket below evolutionary curves
     callout_cfg = {
-        "three_bar_truss": (410, 2.2e-4, (7e-5, 28.0)),
-        "tension_compression_spring": (420, 0.55, (0.14, 2.2e7)),
-        "pressure_vessel": (410, 2.1, (0.85, 2.0e3)),
+        "three_bar_truss": (410, 2.2e-4, 7e-5),
+        "tension_compression_spring": (420, 0.48, 0.12),
+        "pressure_vessel": (410, 1.8, 0.70),
     }
 
     for idx, (p_key, title) in enumerate(problems):
@@ -379,15 +380,17 @@ def plot_surrogate_efficiency_convergence(
         _style_continuous_axes(ax)
         prob = eo.get_problem(p_key)
         f_opt = prob.f_opt
+        max_q75 = 10.0
 
         for alg_key, label, ls, lw in algs:
             prefix = f"{p_key}__{alg_key.replace('-', '_')}"
             grid = traj_data[f"{prefix}__grid"]
             curves = traj_data[f"{prefix}__curves"]
             gaps = np.maximum(1e-5, (curves - f_opt) / f_opt * 100.0)
-            med = np.median(gaps, axis=0)
-            q25 = np.percentile(gaps, 25, axis=0)
-            q75 = np.percentile(gaps, 75, axis=0)
+            has_feasible_run = np.any(np.isfinite(gaps), axis=0)
+            grid, gaps = grid[has_feasible_run], gaps[:, has_feasible_run]
+            q25, med, q75 = np.nanpercentile(gaps, [25, 50, 75], axis=0)
+            max_q75 = max(max_q75, float(np.max(q75)))
 
             color = PALETTE[alg_key]
             ax.plot(
@@ -400,19 +403,21 @@ def plot_surrogate_efficiency_convergence(
                 edgecolor="#111111", linewidth=0.75
             )
 
-        # Annotate 89.3% evaluation reduction cleanly in open whitespace below baseline curves
+        # Mark the prespecified GP evaluation budget.
         sa_med_end = float(
-            np.median(
+            np.nanmedian(
                 np.maximum(
                     1e-5,
                     (traj_data[f"{p_key}__SA_HEOA__curves"][:, -1] - f_opt) / f_opt * 100.0,
                 )
             )
         )
-        tx, ty, y_bounds = callout_cfg[p_key]
+        tx, ty, y_lo = callout_cfg[p_key]
+        y_lo_eff = min(y_lo, 0.35 * max(sa_med_end, 1e-4))
+        y_hi_eff = max_q75 * 2.2
         ax.axvline(160, color=PALETTE["SA-HEOA"], linestyle="--", linewidth=1.1, alpha=0.65, zorder=2)
         ax.annotate(
-            "89.3% Fewer Evals\n($160$ vs. $1{,}500$)",
+            "Evaluation budgets\n($160$ vs. $1{,}500$)",
             xy=(160, max(sa_med_end, 1e-4)),
             xytext=(tx, ty),
             arrowprops=dict(arrowstyle="-|>", color="#B03A2E", lw=1.35, mutation_scale=11),
@@ -425,7 +430,7 @@ def plot_surrogate_efficiency_convergence(
 
         ax.set_yscale("log")
         ax.set_xlim(0, 1550)
-        ax.set_ylim(*y_bounds)
+        ax.set_ylim(y_lo_eff, y_hi_eff)
         _style_continuous_axes(ax)
         ax.set_title(f"({chr(97 + idx)}) {title}", pad=8)
         ax.set_xlabel("True Expensive Function Evaluations $N_{\\mathrm{eval}}$")
@@ -440,7 +445,7 @@ def plot_surrogate_efficiency_convergence(
             )
 
     fig.suptitle(
-        "Sample Efficiency Across Constrained Engineering Benchmarks ($20$ Seeds: Median & Interquartile Band)",
+        "Feasible Objective Gap vs. Evaluation Budget (Median and IQR Across Runs With a Feasible Incumbent)",
         fontsize=12.6, fontweight="bold",
     )
     _finalize_journal_figure(fig)
@@ -450,7 +455,10 @@ def plot_surrogate_efficiency_convergence(
     print(f"  Generated -> {out_path}")
 
 
-def plot_pareto_frontiers(assets_dir: Path) -> None:
+def plot_pareto_frontiers(
+    assets_dir: Path,
+    traj_data: np.lib.npyio.NpzFile,
+) -> None:
     """Figure 3: Constrained AOP Ozonation Reaction Kinetics + ZDT1 & ZDT3 Pareto Fronts."""
     fig, axes = plt.subplots(1, 3, figsize=(16.0, 5.35), constrained_layout=True)
 
@@ -458,25 +466,45 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
     ax0 = axes[0]
     _style_continuous_axes(ax0)
     aop = eo.AOPOzonationKineticsMOO()
-    pf_feas = aop.pareto_front(200)
-    pf_uncons = aop.unconstrained_pareto_front(200)
+    pf_feas = aop.pareto_front(250)
+    pf_uncons = aop.unconstrained_pareto_front(250)
 
-    r_nsga = eo.NSGA2(pop_size=80, max_evals=2400, seed=2).optimize(aop, track_hv=False)
-    r_moead = eo.MOEAD(pop_size=80, max_evals=2400, seed=2).optimize(aop, track_hv=False)
-    r_sansga = eo.SurrogateAssistedNSGA2(
-        max_evals=220, n_init=40, infill_per_iter=10, seed=2
-    ).optimize(aop, track_hv=False)
+    r_nsga = eo.NSGA2(pop_size=80, max_evals=2400, seed=0).optimize(aop, track_hv=False)
+    r_moead = eo.MOEAD(pop_size=80, max_evals=2400, seed=0).optimize(aop, track_hv=False)
+    if "aop_rep__SA_NSGA_II__X_pareto" in traj_data:
+        sa_X_pf = traj_data["aop_rep__SA_NSGA_II__X_pareto"]
+        sa_F_pf = traj_data["aop_rep__SA_NSGA_II__F_pareto"]
+        knee_idx = int(traj_data["aop_rep__knee_idx"][0])
+    else:
+        r_sansga = eo.SurrogateAssistedNSGA2(
+            max_evals=220, n_init=40, infill_per_iter=12, inner_pop_size=52, inner_max_evals=728, seed=0
+        ).optimize(aop, track_hv=False)
+        sa_X_pf = r_sansga.X_pareto
+        sa_F_pf = r_sansga.F_pareto
+        knee_idx = eo.find_knee_point(sa_F_pf)
 
     eta_feas = 100.0 * (1.0 - pf_feas[:, 0])
     eta_uncons = 100.0 * (1.0 - pf_uncons[:, 0])
 
-    # Shade Bromate Regulatory Violation Zone
-    eta_common = np.linspace(float(np.max(eta_feas)), float(np.max(eta_uncons)), 80)
-    eeo_uncons_tail = np.interp(1.0 - eta_common / 100.0, pf_uncons[:, 0], pf_uncons[:, 1])
+    # Shade Bromate Regulatory Violation Zone between Feasible PF and Unconstrained PF
+    eeo_grid = np.linspace(
+        float(max(np.min(pf_feas[:, 1]), np.min(pf_uncons[:, 1]))),
+        float(min(np.max(pf_feas[:, 1]), np.max(pf_uncons[:, 1]))),
+        120,
+    )
+    # Sort ascending in EEO for horizontal fill_betweenx
+    ord_f = np.argsort(pf_feas[:, 1])
+    ord_u = np.argsort(pf_uncons[:, 1])
+    eta_f_of_eeo = np.interp(eeo_grid, pf_feas[ord_f, 1], eta_feas[ord_f])
+    eta_u_of_eeo = np.interp(eeo_grid, pf_uncons[ord_u, 1], eta_uncons[ord_u])
     ax0.fill_betweenx(
-        eeo_uncons_tail, eta_feas[0], eta_common,
-        color="#FADBD8", alpha=0.70, zorder=1,
-        label="Bromate Violation ($[\\mathrm{BrO}_3^-] > 10\\;\\mu\\mathrm{g\\,L^{-1}}$)"
+        eeo_grid,
+        eta_f_of_eeo,
+        np.maximum(eta_f_of_eeo, eta_u_of_eeo),
+        color="#FADBD8",
+        alpha=0.72,
+        zorder=1,
+        label="Bromate Violation ($[\\mathrm{BrO}_3^-] > 10\\;\\mu\\mathrm{g\\,L^{-1}}$)",
     )
     ax0.plot(
         eta_uncons, pf_uncons[:, 1], color="#B03A2E", linestyle="--", linewidth=1.75, zorder=2,
@@ -498,14 +526,13 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
         alpha=0.80, marker="^", zorder=5, label="MOEA/D ($2{,}400$ evals)"
     )
     ax0.scatter(
-        100.0 * (1.0 - r_sansga.F_pareto[:, 0]), r_sansga.F_pareto[:, 1],
+        100.0 * (1.0 - sa_F_pf[:, 0]), sa_F_pf[:, 1],
         s=44, c=PALETTE["SA-NSGA-II"], edgecolor="#111111", linewidth=0.60,
-        marker="D", zorder=6, label="SA-NSGA-II ($220$ evals, $90.8\\%$ saved)"
+        marker="D", zorder=6, label="SA-NSGA-II ($220$ evals)"
     )
 
-    # Highlight Knee-Point Operating Condition
-    knee_idx = eo.find_knee_point(r_sansga.F_pareto)
-    xk = r_sansga.X_pareto[knee_idx]
+    # Highlight Knee-Point Operating Condition (exact match to JSON & README)
+    xk = sa_X_pf[knee_idx]
     dk = aop.evaluate_diagnostics(xk)
     eta_k = 100.0 * dk["eta_removal"]
     eeo_k = dk["eeo_kwh_m3_order"]
@@ -513,21 +540,22 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
         [eta_k], [eeo_k], s=230, c="#F4D03F", edgecolor="#111111",
         marker="*", linewidth=1.25, zorder=10, label="Knee-Point Design"
     )
+    y_max_aop = max(float(np.max(pf_feas[:, 1])), float(np.max(sa_F_pf[:, 1]))) + 0.018
     ax0.annotate(
         f"Knee-Point Reactor Regime:\n"
         f"$\\mathrm{{pH}} = {xk[0]:.2f}$, $[\\mathrm{{O}}_3]_0 = {xk[1]:.2f}\\;\\mathrm{{mg\\,L^{{-1}}}}$\n"
-        f"$\\mathrm{{H}}_2\\mathrm{{O}}_2/\\mathrm{{O}}_3 = {xk[2]:.2f}$, $\\mathrm{{HRT}} = {xk[3]:.1f}\\;\\mathrm{{min}}$\n"
-        f"$\\eta = {eta_k:.1f}\\%$, $[\\mathrm{{BrO}}_3^-] = {dk['bromate_ug_L']:.1f}\\;\\mu\\mathrm{{g\\,L^{{-1}}}}$",
+        f"$\\mathrm{{H}}_2\\mathrm{{O}}_2/\\mathrm{{O}}_3 = {xk[2]:.2f}$, $\\mathrm{{HRT}} = {xk[3]:.2f}\\;\\mathrm{{min}}$\n"
+        f"$\\eta = {eta_k:.2f}\\%$, $[\\mathrm{{BrO}}_3^-] = {dk['bromate_ug_L']:.2f}\\;\\mu\\mathrm{{g\\,L^{{-1}}}}$",
         xy=(eta_k, eeo_k),
-        xytext=(66.2, 0.132),
+        xytext=(70.2, 0.103),
         arrowprops=dict(arrowstyle="-|>", color="#111111", lw=1.3, mutation_scale=11),
-        fontsize=7.9,
+        fontsize=7.8,
         zorder=11,
-        bbox=dict(boxstyle="square,pad=0.30", facecolor="#FEF9E7", edgecolor="#C55A11", lw=1.0, alpha=0.96),
+        bbox=dict(boxstyle="square,pad=0.28", facecolor="#FEF9E7", edgecolor="#C55A11", lw=1.0, alpha=0.96),
     )
 
-    ax0.set_xlim(64.0, 100.5)
-    ax0.set_ylim(0.056, 0.276)
+    ax0.set_xlim(69.5, 100.4)
+    ax0.set_ylim(0.056, y_max_aop)
     ax0.set_title("(a) Peroxone ($\\mathrm{O}_3/\\mathrm{H}_2\\mathrm{O}_2$) AOP Reaction Kinetics", pad=8)
     ax0.set_xlabel("Micropollutant Removal Efficiency $\\eta$ [%]")
     ax0.set_ylabel("Specific Energy Cost $\\mathrm{EE/O}$ [$\\mathrm{kWh\\,m^{-3}\\,order^{-1}}$]")
@@ -552,7 +580,12 @@ def plot_pareto_frontiers(assets_dir: Path) -> None:
         res_n = eo.NSGA2(pop_size=80, max_evals=2400, seed=3).optimize(prob, track_hv=False)
         res_m = eo.MOEAD(pop_size=80, max_evals=2400, seed=3).optimize(prob, track_hv=False)
         res_s = eo.SurrogateAssistedNSGA2(
-            max_evals=220, n_init=40, infill_per_iter=10, seed=3
+            max_evals=220,
+            n_init=40,
+            infill_per_iter=12,
+            inner_pop_size=52,
+            inner_max_evals=728,
+            seed=3,
         ).optimize(prob, track_hv=False)
 
         if "ZDT3" in p_title:
@@ -635,7 +668,7 @@ def plot_constraint_handling_ablation(
 
         for h_key, h_label, col, h_pat in handlers:
             vals = traj_data[f"ablation__{p_key}__{h_key}__f_vals"]
-            data_list.append(vals)
+            data_list.append(vals[np.isfinite(vals)])
             colors.append(col)
             hatches.append(h_pat)
             tick_labels.append(h_label)
@@ -731,6 +764,41 @@ def plot_constraint_handling_ablation(
     print(f"  Generated -> {out_path}")
 
 
+def plot_small_budget(assets_dir: Path, report: dict) -> None:
+    """Draw all paired test runs. Lines connect baseline settings for one seed."""
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 4.1), layout="constrained")
+    settings = [("NSGA-II", "default"), ("NSGA-II", "tuned"),
+                ("MOEA/D", "default"), ("MOEA/D", "tuned"), ("SA-NSGA-II", "fixed")]
+    names = {"aop_ozonation": "Simulated water treatment", "zdt1": "ZDT1", "zdt3": "ZDT3"}
+    seeds = report["test_seeds"]
+    jitter = np.linspace(-0.11, 0.11, len(seeds))
+    for ax, (problem, title) in zip(axes, names.items()):
+        subset = [r for r in report["test_runs"] if r["problem"] == problem]
+        previous = None
+        for i, (algorithm, label) in enumerate(settings):
+            values = {r["seed"]: r["hv_ratio_pct"] for r in subset
+                      if r["algorithm"] == algorithm and r["configuration"] == label}
+            y = np.array([values[s] for s in seeds])
+            color = PALETTE[algorithm]
+            if label == "tuned":
+                ax.plot([i - 1 + jitter, i + jitter], [previous, y],
+                        color=color, alpha=0.22, linewidth=0.7)
+            ax.scatter(i + jitter, y, s=12, color=color, alpha=0.48, zorder=3)
+            ax.scatter(i, y.mean(), s=58, marker="D", color=color,
+                       edgecolor="white", linewidth=0.8, zorder=4)
+            previous = y
+        ax.axhline(100, color="#555555", linewidth=0.9, linestyle="--")
+        ax.set_xticks(range(5), ["NSGA-II\ndefault", "NSGA-II\ntuned", "MOEA/D\ndefault",
+                                 "MOEA/D\ntuned", "SA\nfixed"], fontsize=7.9)
+        ax.set_title(title)
+        ax.set_ylabel("Hypervolume / reference (%)")
+        ax.set_xlim(-0.4, 4.4)
+        ax.grid(axis="x", visible=False)
+    fig.suptitle("220 true evaluations per run · 20 held-out seeds · diamonds show means")
+    fig.savefig(assets_dir / "small_budget_tuning.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     assets_dir = ROOT / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -740,12 +808,15 @@ def main() -> None:
         report = json.load(fp)
     traj_data = np.load(results_dir / "benchmark_trajectories.npz")
 
-    print("[EvoOpt-Figures] Rendering 4 camera-ready journal figures at 300 DPI...")
+    print("[EvoOpt-Figures] Rendering benchmark figures at 300 DPI...")
     plot_three_bar_truss_landscape(assets_dir)
     plot_surrogate_efficiency_convergence(assets_dir, report, traj_data)
-    plot_pareto_frontiers(assets_dir)
+    plot_pareto_frontiers(assets_dir, traj_data)
     plot_constraint_handling_ablation(assets_dir, report, traj_data)
-    print("[EvoOpt-Figures] All 4 figures generated successfully.")
+    tuning_path = results_dir / "small_budget_tuning.json"
+    if tuning_path.exists():
+        plot_small_budget(assets_dir, json.loads(tuning_path.read_text(encoding="utf-8")))
+    print("[EvoOpt-Figures] Figures generated successfully.")
 
 
 if __name__ == "__main__":

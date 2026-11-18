@@ -39,8 +39,10 @@ from evoopt.optimizers import (
     NSGA2,
     MultiObjectiveResult,
     OptimizationResult,
+    _archive_history_f,
     _extract_feasible_pareto,
     _select_best_archive_solution,
+    polynomial_mutation,
 )
 from evoopt.problems import BenchmarkProblem, MultiObjectiveProblem
 
@@ -224,18 +226,27 @@ class GaussianProcessSurrogate:
             log_det = 2.0 * float(np.sum(np.log(np.diag(L))))
             return 0.5 * n_samples * float(np.sum(np.log(sig2))) + 0.5 * active_Y.shape[1] * log_det
 
-        # Coarse isotropic warm-start + fast ARD L-BFGS-B polish
+        # Coarse isotropic warm-start + optional random restarts + fast ARD L-BFGS-B polish
         grid_candidates = [np.full(dim, np.log(v)) for v in (0.12, 0.30, 0.70, 1.50)]
-        best_log_ls = min(grid_candidates, key=_neg_concentrated_ll)
-        res = minimize(
-            _neg_concentrated_ll,
-            best_log_ls,
-            method="L-BFGS-B",
-            bounds=[(-3.2, 1.8)] * dim,
-            options={"maxiter": 10, "ftol": 1e-4},
-        )
-        if np.all(np.isfinite(res.x)):
-            best_log_ls = res.x
+        start_points = [min(grid_candidates, key=_neg_concentrated_ll)]
+        if self.n_restarts > 0:
+            rng_gp = np.random.default_rng(self.seed)
+            for _ in range(self.n_restarts):
+                start_points.append(rng_gp.uniform(-2.8, 1.5, size=dim))
+
+        best_log_ls = start_points[0]
+        best_nll = float(_neg_concentrated_ll(best_log_ls))
+        for x0 in start_points:
+            res = minimize(
+                _neg_concentrated_ll,
+                x0,
+                method="L-BFGS-B",
+                bounds=[(-3.2, 1.8)] * dim,
+                options={"maxiter": 10, "ftol": 1e-4},
+            )
+            if np.all(np.isfinite(res.x)) and float(res.fun) < best_nll:
+                best_log_ls = res.x
+                best_nll = float(res.fun)
 
         self.length_scales_ = np.exp(best_log_ls)
         R_opt = self._matern52_cov(X_scaled, X_scaled, self.length_scales_)
@@ -249,7 +260,7 @@ class GaussianProcessSurrogate:
         return self
 
     def predict(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Return (mean, std) arrays of shape (N, n_targets)."""
+        """Return latent deterministic posterior (mean, std) arrays of shape (N, n_targets)."""
         X_scaled = self._scale_X(X)
         if X_scaled.ndim == 1:
             X_scaled = X_scaled[np.newaxis, :]
@@ -258,7 +269,7 @@ class GaussianProcessSurrogate:
         mu_norm = K_star @ self.alpha_
 
         v = solve_triangular(self.L_, K_star.T, lower=True, check_finite=False)
-        mse = np.maximum(1.0 + self.nugget - np.sum(v * v, axis=0), 1e-12)
+        mse = np.maximum(1.0 - np.sum(v * v, axis=0), 1e-12)
         std_norm = np.sqrt(mse[:, np.newaxis] * self.sigma2_proc_[np.newaxis, :])
 
         mu = mu_norm * self.y_std + self.y_mean
@@ -384,12 +395,10 @@ class DeepEnsembleSurrogate:
         for _ in range(self.epochs):
             optimizer.zero_grad()
             preds = self.net(x_t)
-            loss = torch.mean(
-                w_t
-                * nn.functional.smooth_l1_loss(
-                    preds, y_t, reduction="none", beta=0.5
-                )
+            per_elem = w_t * nn.functional.smooth_l1_loss(
+                preds, y_t, reduction="none", beta=0.5
             )
+            loss = torch.sum(torch.mean(per_elem, dim=(1, 2)))
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -561,7 +570,7 @@ class SurrogateAssistedHEOA:
 
         _, f_b, _, cv_b, is_feas = _select_best_archive_solution(X_arch, f_arch, G_arch)
         history_evals = [n_evals]
-        history_f = [f_b if is_feas else float(np.min(f_arch) + 1e3 * cv_b)]
+        history_f = [_archive_history_f(f_arch, f_b, cv_b, is_feas)]
         history_cv = [cv_b]
 
         step = 0
@@ -604,8 +613,8 @@ class SurrogateAssistedHEOA:
                     (X_arch - x_inc) / np.maximum(span, 1e-12), axis=1
                 )
                 loc_idx = np.argsort(norm_dists)[:k_loc]
-                local_surr = GaussianProcessSurrogate(
-                    tr_lb, tr_ub, n_restarts=0, seed=base_seed + step * 19
+                local_surr = self._build_surrogate(
+                    tr_lb, tr_ub, seed=base_seed + step * 19
                 )
                 local_surr.fit(X_arch[loc_idx], Y_arch[loc_idx])
 
@@ -629,7 +638,7 @@ class SurrogateAssistedHEOA:
                 )
                 cand_list.append(c2)
 
-                # 3. Micro Trust-Region Active-Boundary Polish (pure vectorized GP exploitation)
+                # 3. Micro Trust-Region Active-Boundary Polish (surrogate exploitation)
                 if len(cand_list) < k_batch:
                     if problem.n_constraints > 0 and progress >= 0.40:
                         micro_r = max(2e-3, 0.22 * radius)
@@ -687,7 +696,7 @@ class SurrogateAssistedHEOA:
                 X_arch, f_arch, G_arch
             )
             history_evals.append(n_evals)
-            history_f.append(f_b if is_feas else float(np.min(f_arch) + 1e3 * cv_b))
+            history_f.append(_archive_history_f(f_arch, f_b, cv_b, is_feas))
             history_cv.append(cv_b)
 
         x_best, f_best, g_best, cv_best, is_feas = _select_best_archive_solution(
@@ -891,12 +900,23 @@ class SurrogateAssistedNSGA2:
             surr_prob = _SurrogateMOOProblem(
                 problem, surrogate, kappa=kappa, beta_g=beta_g
             )
+            # Warm-start half of the inner surrogate population with archive elites
+            X_elites, _, _ = _extract_feasible_pareto(X_arch, F_arch, G_arch)
+            n_warm = min(self.inner_pop_size // 2, max(4, len(X_elites) * 2))
+            warm_list: List[np.ndarray] = []
+            for idx_e in range(min(len(X_elites), n_warm)):
+                warm_list.append(X_elites[idx_e].copy())
+            while len(warm_list) < n_warm:
+                base_e = X_elites[int(rng.integers(0, len(X_elites)))]
+                warm_list.append(polynomial_mutation(base_e, lb, ub, rng, eta_m=15.0))
+            init_warm = np.asarray(warm_list, dtype=np.float64)
+
             inner_nsga2 = NSGA2(
                 pop_size=self.inner_pop_size,
                 max_evals=self.inner_max_evals,
                 seed=base_seed + step * 17,
             )
-            surr_res = inner_nsga2.optimize(surr_prob, track_hv=False)
+            surr_res = inner_nsga2.optimize(surr_prob, track_hv=False, init_X=init_warm)
 
             k_batch = min(self.infill_per_iter, self.max_evals - n_evals)
             cv_arch = compute_cv(G_arch)

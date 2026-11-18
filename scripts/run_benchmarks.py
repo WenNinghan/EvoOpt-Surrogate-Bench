@@ -23,6 +23,7 @@ Outputs:
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor
 import json
 import os
 import platform
@@ -103,7 +104,8 @@ def _run_single_so_job(args: Tuple[str, str, int]) -> Dict[str, Any]:
         raise ValueError(f"Unknown algorithm: {alg_name}")
 
     res = opt.optimize(prob)
-    curve = _interp_curve(grid, res.history_evals, res.history_f)
+    feasible_history = np.where(res.history_cv <= 0.0, res.history_f, np.nan)
+    curve = _interp_curve(grid, res.history_evals, feasible_history)
     rel_err = abs(res.f_best - prob.f_opt) / max(abs(prob.f_opt), 1e-12)
 
     return {
@@ -157,31 +159,31 @@ def _build_moo_problem(prob_key: str) -> eo.MultiObjectiveProblem:
     raise ValueError(f"Unknown MOO problem: {prob_key}")
 
 
-def _run_moo_job(args: Tuple[str, str, int]) -> Dict[str, Any]:
-    prob_key, alg_name, seed = args
+def _run_moo_job(args: Tuple[str, str, int, int]) -> Dict[str, Any]:
+    prob_key, alg_name, budget, seed = args
     prob = _build_moo_problem(prob_key)
     pf_ref = prob.pareto_front(n_points=250)
 
     if alg_name == "NSGA-II":
-        opt = eo.NSGA2(pop_size=80, max_evals=MOO_EA_BUDGET, seed=seed)
+        opt = eo.NSGA2(pop_size=80, max_evals=budget, seed=seed)
     elif alg_name == "MOEA/D":
-        opt = eo.MOEAD(pop_size=80, max_evals=MOO_EA_BUDGET, seed=seed)
+        opt = eo.MOEAD(pop_size=80, max_evals=budget, seed=seed)
     elif alg_name == "SA-NSGA-II":
         opt = eo.SurrogateAssistedNSGA2(
-            max_evals=MOO_SA_BUDGET,
+            max_evals=budget,
             n_init=40,
-            infill_per_iter=15,
-            inner_pop_size=48,
-            inner_max_evals=576,
+            infill_per_iter=12,
+            inner_pop_size=52,
+            inner_max_evals=728,
             seed=seed,
         )
     else:
         raise ValueError(f"Unknown MOO algorithm: {alg_name}")
 
     res = opt.optimize(prob, track_hv=False)
-    hv = eo.compute_hypervolume(res.F_pareto, prob.ref_point)
-    igd = eo.compute_igd(res.F_pareto, pf_ref, normalize=False)
-    max_cv = float(np.max(eo.compute_cv(res.G_pareto))) if res.G_pareto.size > 0 else 0.0
+    feasible_front = res.F_pareto[eo.compute_cv(res.G_pareto) <= 0.0]
+    hv = eo.compute_hypervolume(feasible_front, prob.ref_point)
+    igd = eo.compute_igd(feasible_front, pf_ref, normalize=False)
 
     return {
         "problem": prob.name,
@@ -189,10 +191,25 @@ def _run_moo_job(args: Tuple[str, str, int]) -> Dict[str, Any]:
         "algorithm": alg_name,
         "seed": seed,
         "n_evals": int(res.n_evals),
-        "n_pareto": int(len(res.F_pareto)),
+        "n_pareto": int(len(feasible_front)),
         "hv": float(hv),
         "igd": float(igd),
-        "feasible": bool(max_cv <= 1e-9),
+        "feasible": bool(len(feasible_front)),
+    }
+
+
+def _feasible_stats(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    good = [r for r in runs if r["is_feasible"]]
+    f = [r["f_best"] for r in good]
+    err = [r["rel_error_pct"] for r in good]
+    return {
+        "feasibility_rate_pct": 100.0 * len(good) / len(runs),
+        "f_best_min": float(np.min(f)) if good else None,
+        "f_best_median": float(np.median(f)) if good else None,
+        "f_best_mean": float(np.mean(f)) if good else None,
+        "f_best_std": float(np.std(f)) if good else None,
+        "rel_error_mean_pct": float(np.mean(err)) if good else None,
+        "rel_error_median_pct": float(np.median(err)) if good else None,
     }
 
 
@@ -201,39 +218,39 @@ def main() -> None:
     results_dir = ROOT / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[EvoOpt-Bench] Running 20-seed benchmarks in single-process vectorized mode...")
+    n_workers = min(8, os.cpu_count() or 4)
+    print(f"[EvoOpt-Bench] Running 20-seed benchmarks across {n_workers} parallel workers...")
 
-    # ------------------------------------------------------------------
-    # Part 1: Constrained Engineering Single-Objective Benchmarks
-    # ------------------------------------------------------------------
     so_problems = ["three_bar_truss", "tension_compression_spring", "pressure_vessel"]
     so_algs = ["HEOA", "DE", "PSO", "SA-HEOA", "SA-HEOA-DEns"]
     so_jobs = [
         (p, a, s) for p in so_problems for a in so_algs for s in range(N_SEEDS)
     ]
-    so_raw = [_run_single_so_job(j) for j in so_jobs]
-    print(f"  [1/3] Single-objective engineering runs complete ({len(so_raw)} runs, {time.time()-t_start:.1f}s).")
 
-    # ------------------------------------------------------------------
-    # Part 2: Constraint-Handling Mechanism Ablation (20 seeds)
-    # ------------------------------------------------------------------
     handlers = ["deb", "epsilon", "penalty"]
     ablation_jobs = [
         (p, h, s) for p in so_problems for h in handlers for s in range(N_SEEDS)
     ]
-    ablation_raw = [_run_ablation_job(j) for j in ablation_jobs]
-    print(f"  [2/3] Constraint-handling ablation runs complete ({len(ablation_raw)} runs, {time.time()-t_start:.1f}s).")
 
-    # ------------------------------------------------------------------
-    # Part 3: Multi-Objective & AOP Chemical Reaction Benchmarks (20 seeds)
-    # ------------------------------------------------------------------
     moo_problems = ["aop_ozonation", "zdt1", "zdt3"]
-    moo_algs = ["NSGA-II", "MOEA/D", "SA-NSGA-II"]
-    moo_jobs = [
-        (p, a, s) for p in moo_problems for a in moo_algs for s in range(N_SEEDS)
+    moo_configs = [
+        ("NSGA-II", MOO_EA_BUDGET), ("MOEA/D", MOO_EA_BUDGET),
+        ("NSGA-II", MOO_SA_BUDGET), ("MOEA/D", MOO_SA_BUDGET),
+        ("SA-NSGA-II", MOO_SA_BUDGET),
     ]
-    moo_raw = [_run_moo_job(j) for j in moo_jobs]
-    print(f"  [3/3] Multi-objective Pareto runs complete ({len(moo_raw)} runs, {time.time()-t_start:.1f}s).")
+    moo_jobs = [
+        (p, a, b, s) for p in moo_problems for a, b in moo_configs for s in range(N_SEEDS)
+    ]
+
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        so_raw = list(pool.map(_run_single_so_job, so_jobs))
+        print(f"  [1/3] Single-objective engineering runs complete ({len(so_raw)} runs, {time.time()-t_start:.1f}s).")
+
+        ablation_raw = list(pool.map(_run_ablation_job, ablation_jobs))
+        print(f"  [2/3] Constraint-handling ablation runs complete ({len(ablation_raw)} runs, {time.time()-t_start:.1f}s).")
+
+        moo_raw = list(pool.map(_run_moo_job, moo_jobs))
+        print(f"  [3/3] Multi-objective Pareto runs complete ({len(moo_raw)} runs, {time.time()-t_start:.1f}s).")
 
     # ------------------------------------------------------------------
     # Aggregate & Save Structured JSON + CSV + Trajectory Cache
@@ -253,7 +270,6 @@ def main() -> None:
         for alg in so_algs:
             sub = [r for r in so_raw if r["prob_key"] == p_key and r["algorithm"] == alg]
             f_vals = np.array([r["f_best"] for r in sub], dtype=np.float64)
-            rel_errs = np.array([r["rel_error_pct"] for r in sub], dtype=np.float64)
             feas_flags = np.array([r["is_feasible"] for r in sub], dtype=bool)
             n_evals = int(sub[0]["n_evals"])
             eval_savings = 100.0 * (1.0 - n_evals / EA_BUDGET)
@@ -263,21 +279,15 @@ def main() -> None:
             key_prefix = f"{p_key}__{alg.replace('-', '_')}"
             traj_npz[f"{key_prefix}__grid"] = grid
             traj_npz[f"{key_prefix}__curves"] = curves
-            traj_npz[f"{key_prefix}__f_vals"] = f_vals
+            traj_npz[f"{key_prefix}__f_vals"] = np.where(feas_flags, f_vals, np.nan)
 
-            best_idx = int(np.argmin(f_vals))
+            best = min((r for r in sub if r["is_feasible"]), key=lambda r: r["f_best"], default=None)
             so_summary[prob_obj.name]["algorithms"][alg] = {
                 "n_seeds": N_SEEDS,
                 "n_evals": n_evals,
                 "eval_savings_pct": round(eval_savings, 2),
-                "feasibility_rate_pct": round(100.0 * float(np.mean(feas_flags)), 2),
-                "f_best_min": float(np.min(f_vals)),
-                "f_best_median": float(np.median(f_vals)),
-                "f_best_mean": float(np.mean(f_vals)),
-                "f_best_std": float(np.std(f_vals)),
-                "rel_error_mean_pct": float(np.mean(rel_errs)),
-                "rel_error_median_pct": float(np.median(rel_errs)),
-                "best_x": sub[best_idx]["x_best"],
+                **_feasible_stats(sub),
+                "best_x": best["x_best"] if best else None,
             }
 
     ablation_summary: Dict[str, Any] = {}
@@ -298,38 +308,40 @@ def main() -> None:
             f_vals = np.array([r["f_best"] for r in sub], dtype=np.float64)
             rel_errs = np.array([r["rel_error_pct"] for r in sub], dtype=np.float64)
             feas_flags = np.array([r["is_feasible"] for r in sub], dtype=bool)
-            traj_npz[f"ablation__{p_key}__{h_key}__f_vals"] = f_vals
-            traj_npz[f"ablation__{p_key}__{h_key}__rel_err"] = rel_errs
+            traj_npz[f"ablation__{p_key}__{h_key}__f_vals"] = np.where(feas_flags, f_vals, np.nan)
+            traj_npz[f"ablation__{p_key}__{h_key}__rel_err"] = np.where(feas_flags, rel_errs, np.nan)
 
             ablation_summary[prob_obj.name][handler_labels[h_key]] = {
                 "n_seeds": N_SEEDS,
                 "n_evals": EA_BUDGET,
-                "feasibility_rate_pct": round(100.0 * float(np.mean(feas_flags)), 2),
-                "f_best_min": float(np.min(f_vals)),
-                "f_best_median": float(np.median(f_vals)),
-                "f_best_mean": float(np.mean(f_vals)),
-                "f_best_std": float(np.std(f_vals)),
-                "rel_error_mean_pct": float(np.mean(rel_errs)),
-                "rel_error_median_pct": float(np.median(rel_errs)),
-                "seed_f_values": f_vals.tolist(),
+                **_feasible_stats(sub),
+                "seed_f_values": [r["f_best"] if r["is_feasible"] else None for r in sub],
             }
 
-    # Compute Knee-Point engineering diagnostics on AOP Ozonation Reaction Kinetics
+    # Compute Knee-Point engineering diagnostics on AOP Ozonation Reaction Kinetics (seed=0)
     aop_prob = eo.AOPOzonationKineticsMOO()
     aop_sa_rep = eo.SurrogateAssistedNSGA2(
-        max_evals=MOO_SA_BUDGET, n_init=40, infill_per_iter=10, seed=0
-    ).optimize(aop_prob)
+        max_evals=MOO_SA_BUDGET,
+        n_init=40,
+        infill_per_iter=12,
+        inner_pop_size=52,
+        inner_max_evals=728,
+        seed=0,
+    ).optimize(aop_prob, track_hv=False)
     knee_idx = eo.find_knee_point(aop_sa_rep.F_pareto)
     x_knee = aop_sa_rep.X_pareto[knee_idx]
     knee_diag = aop_prob.evaluate_diagnostics(x_knee)
+    traj_npz["aop_rep__SA_NSGA_II__X_pareto"] = aop_sa_rep.X_pareto
+    traj_npz["aop_rep__SA_NSGA_II__F_pareto"] = aop_sa_rep.F_pareto
+    traj_npz["aop_rep__knee_idx"] = np.array([knee_idx], dtype=np.int64)
 
     moo_rows: List[Dict[str, Any]] = []
     for p_key in moo_problems:
         prob_obj = _build_moo_problem(p_key)
         pf_ref = prob_obj.pareto_front(250)
         hv_ref = eo.compute_hypervolume(pf_ref, prob_obj.ref_point)
-        for alg in moo_algs:
-            sub = [r for r in moo_raw if r["prob_key"] == p_key and r["algorithm"] == alg]
+        for alg, budget in moo_configs:
+            sub = [r for r in moo_raw if r["prob_key"] == p_key and r["algorithm"] == alg and r["n_evals"] == budget]
             hvs = np.array([r["hv"] for r in sub], dtype=np.float64)
             igds = np.array([r["igd"] for r in sub], dtype=np.float64)
             feas = np.array([r["feasible"] for r in sub], dtype=bool)
@@ -375,6 +387,9 @@ def main() -> None:
         "single_objective_benchmarks": so_summary,
         "constraint_handling_ablation": ablation_summary,
         "multi_objective_benchmarks": moo_rows,
+        "multi_objective_runs": moo_raw,
+        "single_objective_runs": [{k: v for k, v in r.items() if k not in ("grid", "curve")} for r in so_raw],
+        "constraint_handling_runs": ablation_raw,
         "aop_ozonation_knee_point": {
             "pH": round(float(x_knee[0]), 3),
             "O3_dose_mg_L": round(float(x_knee[1]), 3),
@@ -402,6 +417,9 @@ def main() -> None:
     for p_name, p_data in so_summary.items():
         print(f"\n{p_name} (f* = {p_data['f_opt']:.6f}):")
         for alg, st in p_data["algorithms"].items():
+            if st["f_best_mean"] is None:
+                print(f"  {alg:14s} | no feasible run")
+                continue
             print(
                 f"  {alg:14s} | Evals={st['n_evals']:4d} (Save {st['eval_savings_pct']:5.1f}%) "
                 f"| Mean={st['f_best_mean']:.6f} +/- {st['f_best_std']:.6f} "
