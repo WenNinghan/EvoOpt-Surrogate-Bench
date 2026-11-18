@@ -6,9 +6,9 @@
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-Deep%20Ensembles-EE4C2C.svg)](#2-surrogate-modeling--constrained-infill-criteria)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-`EvoOpt-Surrogate-Bench` is a modular, framework connecting **Human Evolutionary Optimization Algorithm (`HEOA`)** and **Multi-Objective Evolutionary Computation (`NSGA-II`, `MOEA/D`, `DE`, `PSO`)** with **Bayesian Kriging (Gaussian Processes) and PyTorch Deep Ensemble Surrogates**.
+On a simulated water-treatment problem, surrogate-assisted NSGA-II attained **98.37% of reference hypervolume**, compared with **93.00%** for budget-tuned MOEA/D and **91.86%** for budget-tuned NSGA-II. Each run evaluated 220 candidate designs against the simulation equations. The surrogate method led on all 20 held-out seeds. Its mean advantage over MOEA/D was **5.37 percentage points** (paired 95% bootstrap interval 4.32–6.44). [Tuning protocol and results](#held-out-small-budget-comparison) · [Per-seed feasible designs and objectives](results/small_budget_tuning.json)
 
-The benchmark compares objective quality under prespecified evaluation budgets on analytical engineering problems, ZDT functions and a simulated water-treatment case. The original suite uses seeds 0–19. A separate [small-budget experiment](#held-out-small-budget-comparison) tunes both direct multi-objective optimizers on development seeds, then tests all methods on fresh seeds. A true evaluation here is a call on one candidate to the benchmark equations. Surrogate training time and inner-loop evaluations are additional computational costs.
+Eight separate development seeds were used for tuning. The evaluation budget counts simulator calls. Fitting the surrogate and evaluating its candidate designs take additional computation. The repository also benchmarks analytical engineering problems and ZDT functions using Gaussian processes, deep ensembles and direct evolutionary search.
 
 ---
 
